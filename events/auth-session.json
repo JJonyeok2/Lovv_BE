@@ -1,0 +1,20 @@
+{
+  "version": "2.0",
+  "routeKey": "GET /api/v1/auth/session",
+  "rawPath": "/api/v1/auth/session",
+  "headers": {
+    "cookie": "lovv_session=replace-with-refresh-session-token"
+  },
+  "cookies": [
+    "lovv_session=replace-with-refresh-session-token"
+  ],
+  "requestContext": {
+    "http": {
+      "method": "GET",
+      "path": "/api/v1/auth/session",
+      "sourceIp": "127.0.0.1",
+      "userAgent": "sam-local"
+    }
+  },
+  "isBase64Encoded": false
+}

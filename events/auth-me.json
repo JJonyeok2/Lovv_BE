@@ -1,0 +1,29 @@
+{
+  "version": "2.0",
+  "routeKey": "GET /api/v1/auth/me",
+  "rawPath": "/api/v1/auth/me",
+  "headers": {
+    "authorization": "Bearer replace-with-local-demo-token"
+  },
+  "requestContext": {
+    "http": {
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "sourceIp": "127.0.0.1",
+      "userAgent": "sam-local"
+    },
+    "authorizer": {
+      "lambda": {
+        "sub": "replace-with-user-id",
+        "userId": "replace-with-user-id",
+        "sid": "replace-with-session-id",
+        "sessionId": "replace-with-session-id",
+        "provider": "google",
+        "roles": "R-USER",
+        "iss": "lovv-auth",
+        "aud": "lovv-api"
+      }
+    }
+  },
+  "isBase64Encoded": false
+}

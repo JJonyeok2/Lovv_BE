@@ -1,0 +1,23 @@
+{
+  "version": "2.0",
+  "routeKey": "POST /api/v1/me/itineraries",
+  "rawPath": "/api/v1/me/itineraries",
+  "headers": {
+    "content-type": "application/json",
+    "authorization": "Bearer replace-with-access-token"
+  },
+  "requestContext": {
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/me/itineraries"
+    },
+    "authorizer": {
+      "lambda": {
+        "userId": "replace-with-user-id",
+        "roles": "R-USER"
+      }
+    }
+  },
+  "body": "{\"sourceRecommendationId\":\"rec-example\",\"idempotencyKey\":\"idem-example\",\"title\":\"강릉 1박 2일 미식 산책\",\"summary\":\"바다와 미식을 묶은 일정입니다.\",\"destination\":{\"destinationId\":\"KR-Gangneung\",\"name\":\"강릉\",\"country\":\"KR\",\"region\":\"강원\"},\"tripType\":\"2d1n\",\"durationLabel\":\"1박 2일\",\"themes\":[\"food_local\"],\"conditionsSnapshot\":{\"travelMonth\":10},\"requestSummary\":\"조용한 바다와 미식\",\"itinerary\":{\"days\":[{\"day\":1,\"title\":\"바다 산책\",\"items\":[{\"itemId\":\"item-1\",\"sortOrder\":1,\"title\":\"안목해변\",\"body\":\"해변 산책\"}]}]}}",
+  "isBase64Encoded": false
+}

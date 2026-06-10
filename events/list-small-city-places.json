@@ -1,0 +1,12 @@
+{
+  "rawPath": "/api/small-cities/KR-Gangneung/places",
+  "pathParameters": {
+    "cityId": "KR-Gangneung"
+  },
+  "requestContext": {
+    "http": {
+      "method": "GET"
+    }
+  },
+  "queryStringParameters": null
+}

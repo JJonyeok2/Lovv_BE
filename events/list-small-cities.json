@@ -1,0 +1,15 @@
+{
+  "rawPath": "/api/small-cities",
+  "requestContext": {
+    "http": {
+      "method": "GET"
+    }
+  },
+  "queryStringParameters": {
+    "country": "KR",
+    "q": "커피",
+    "themes": "미식",
+    "page": "1",
+    "page_size": "20"
+  }
+}

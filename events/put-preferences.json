@@ -1,0 +1,23 @@
+{
+  "version": "2.0",
+  "routeKey": "PUT /api/v1/me/preferences",
+  "rawPath": "/api/v1/me/preferences",
+  "headers": {
+    "content-type": "application/json",
+    "authorization": "Bearer replace-with-access-token"
+  },
+  "requestContext": {
+    "http": {
+      "method": "PUT",
+      "path": "/api/v1/me/preferences"
+    },
+    "authorizer": {
+      "lambda": {
+        "userId": "replace-with-user-id",
+        "roles": "R-USER"
+      }
+    }
+  },
+  "body": "{\"countryTrack\":\"KR\",\"mappedThemes\":[\"history_tradition\"],\"preferredRegions\":[\"gyeongbuk\"],\"pace\":\"balanced\",\"tripDays\":3}",
+  "isBase64Encoded": false
+}

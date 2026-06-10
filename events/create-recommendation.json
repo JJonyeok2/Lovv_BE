@@ -1,0 +1,16 @@
+{
+  "version": "2.0",
+  "routeKey": "POST /api/v1/recommendations",
+  "rawPath": "/api/v1/recommendations",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "requestContext": {
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/recommendations"
+    }
+  },
+  "body": "{\"entryType\":\"map_marker\",\"destinationId\":\"KR-Gangneung\",\"country\":\"KR\",\"tripType\":\"2d1n\",\"themes\":[\"food_local\"],\"includeFestivals\":true,\"naturalLanguageQuery\":\"바다와 미식 중심 일정\"}",
+  "isBase64Encoded": false
+}

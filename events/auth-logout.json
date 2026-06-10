@@ -1,0 +1,19 @@
+{
+  "version": "2.0",
+  "routeKey": "POST /api/v1/auth/logout",
+  "rawPath": "/api/v1/auth/logout",
+  "headers": {
+    "content-type": "application/json",
+    "cookie": "lovv_session=replace-with-refresh-session-token"
+  },
+  "requestContext": {
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/auth/logout",
+      "sourceIp": "127.0.0.1",
+      "userAgent": "sam-local"
+    }
+  },
+  "body": "{}",
+  "isBase64Encoded": false
+}
