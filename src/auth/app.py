@@ -1,0 +1,341 @@
+import base64
+import hashlib
+import json
+import os
+import secrets
+import time
+from datetime import datetime, timezone
+
+from auth.provider_verifier import ProviderValidationError, ProviderVerifier
+from auth.session_repository import DynamoDbSessionRepository, SessionRepositoryError
+from auth.user_repository import RdsDataUserRepository, UserRepositoryError
+from preferences.repository import RdsDataPreferenceRepository
+from shared.auth import AuthTokenError, create_access_token, extract_bearer_token, verify_access_token
+from shared.http import empty_response, error_response, json_response
+
+
+def lambda_handler(event, context):
+    return handle_request(event or {})
+
+
+def handle_request(event, provider_verifier=None, user_repository=None, session_repository=None, preference_repository=None):
+    try:
+        return _handle_request(event or {}, provider_verifier, user_repository, session_repository, preference_repository)
+    except (AuthRequestError, ProviderValidationError, UserRepositoryError, SessionRepositoryError) as error:
+        return error_response(error.status_code, error.code, error.message)
+    except AuthTokenError as error:
+        return error_response(error.status_code, error.code, error.message)
+    except Exception:
+        return error_response(500, "INTERNAL_ERROR", "Internal server error")
+
+
+def _handle_request(event, provider_verifier=None, user_repository=None, session_repository=None, preference_repository=None):
+    method = _event_method(event)
+    path = _event_path(event)
+
+    if method == "OPTIONS":
+        return json_response(200, {})
+    if method == "POST" and path == "/api/v1/auth/google":
+        return _handle_social_login(
+            "google",
+            event,
+            provider_verifier or ProviderVerifier(),
+            user_repository or RdsDataUserRepository.from_env(),
+            session_repository or DynamoDbSessionRepository.from_env(),
+        )
+    if method == "POST" and path == "/api/v1/auth/kakao":
+        return _handle_social_login(
+            "kakao",
+            event,
+            provider_verifier or ProviderVerifier(),
+            user_repository or RdsDataUserRepository.from_env(),
+            session_repository or DynamoDbSessionRepository.from_env(),
+        )
+    if method == "GET" and path == "/api/v1/auth/me":
+        return _handle_me(event, user_repository or RdsDataUserRepository.from_env())
+    if method == "GET" and path == "/api/v1/auth/session":
+        return _handle_session(
+            event,
+            user_repository or RdsDataUserRepository.from_env(),
+            session_repository or DynamoDbSessionRepository.from_env(),
+            preference_repository or RdsDataPreferenceRepository.from_env(),
+        )
+    if method == "POST" and path == "/api/v1/auth/logout":
+        return _handle_logout(event, session_repository or DynamoDbSessionRepository.from_env())
+
+    return error_response(404, "NOT_FOUND", "Route not found")
+
+
+def _handle_social_login(provider, event, provider_verifier, user_repository, session_repository):
+    body = _json_body(event)
+    credential_type = body.get("credentialType")
+    credential = body.get("credential") or body.get("providerToken")
+    if not credential_type or not credential:
+        raise AuthRequestError(400, "INVALID_REQUEST", "credentialType and credential are required")
+
+    identity = provider_verifier.verify(
+        provider,
+        credential_type,
+        credential,
+        nonce=body.get("nonce"),
+        redirect_uri=body.get("redirectUri"),
+    )
+    now_iso = _now_iso()
+    user_result = user_repository.upsert_from_provider(identity, now_iso)
+    refresh_token = secrets.token_urlsafe(48)
+    expires_at_epoch = _now_epoch() + _refresh_ttl_seconds()
+    refresh_token_hash = _hash_token(refresh_token)
+    session = session_repository.create_session(
+        user_id=user_result.user["userId"],
+        provider=provider,
+        refresh_token_hash=refresh_token_hash,
+        expires_at_epoch=expires_at_epoch,
+        now_epoch=_now_epoch(),
+        user_agent=_user_agent(event),
+        ip_address=_source_ip(event),
+    )
+    access_token = create_access_token(
+        user_id=user_result.user["userId"],
+        session_id=session["sessionId"],
+        provider=provider,
+        display_name=user_result.user.get("displayName"),
+        roles=user_result.user.get("roles") or ["R-USER"],
+    )
+
+    return json_response(
+        200,
+        {
+            "accessToken": access_token.token,
+            "tokenType": "Bearer",
+            "expiresIn": access_token.expires_in,
+            "session": {
+                "sessionId": session["sessionId"],
+                "expiresAt": _iso_from_epoch(session["expiresAt"]),
+            },
+            "user": _public_user(user_result.user, is_new_user=user_result.is_new_user),
+            "linkedProvider": provider,
+        },
+        headers={"Set-Cookie": _session_cookie(refresh_token, _refresh_ttl_seconds())},
+    )
+
+
+def _handle_me(event, user_repository):
+    claims = _authorizer_claims(event)
+    if claims is None:
+        token = extract_bearer_token(event.get("headers") or {})
+        claims = verify_access_token(token)
+
+    user_id = claims.get("userId") or claims.get("sub")
+    user = user_repository.get_user(user_id)
+    if not user:
+        raise AuthRequestError(404, "USER_NOT_FOUND", "User was not found")
+    return json_response(200, {"user": _public_user(user)})
+
+
+def _handle_session(event, user_repository, session_repository, preference_repository):
+    refresh_token = _refresh_token_from_event(event)
+    if not refresh_token:
+        raise AuthRequestError(401, "UNAUTHORIZED", "Missing refresh session")
+
+    session = session_repository.find_active_by_refresh_hash(_hash_token(refresh_token), now_epoch=_now_epoch())
+    if not session:
+        raise AuthRequestError(401, "UNAUTHORIZED", "Missing refresh session")
+
+    user = user_repository.get_user(session["userId"])
+    if not user:
+        raise AuthRequestError(404, "USER_NOT_FOUND", "User was not found")
+
+    access_token = create_access_token(
+        user_id=user["userId"],
+        session_id=session["sessionId"],
+        provider=session.get("provider"),
+        display_name=user.get("displayName"),
+        roles=user.get("roles") or ["R-USER"],
+    )
+    preference = preference_repository.get_by_user_id(user["userId"]) if preference_repository else None
+    onboarding_completed = bool(preference and preference.get("onboardingCompleted"))
+    return json_response(
+        200,
+        {
+            "authenticated": True,
+            "accessToken": access_token.token,
+            "tokenType": "Bearer",
+            "expiresIn": access_token.expires_in,
+            "user": _public_user(user),
+            "preferences": _session_preference(preference) if onboarding_completed else None,
+            "onboardingCompleted": onboarding_completed,
+        },
+    )
+
+
+def _handle_logout(event, session_repository):
+    refresh_token = _refresh_token_from_event(event)
+    session_id = None
+    if refresh_token:
+        session = session_repository.find_active_by_refresh_hash(_hash_token(refresh_token), now_epoch=_now_epoch())
+        if session:
+            session_id = session["sessionId"]
+    if session_id is None:
+        session_id = _session_id_from_bearer(event)
+    if session_id:
+        session_repository.revoke_session(session_id, now_epoch=_now_epoch())
+    if not refresh_token and not session_id:
+        return empty_response(204, headers={"Set-Cookie": _clear_session_cookie()})
+    return json_response(200, {"success": True}, headers={"Set-Cookie": _clear_session_cookie()})
+
+
+def _event_method(event):
+    request_context = event.get("requestContext") or {}
+    http_context = request_context.get("http") or {}
+    return (http_context.get("method") or event.get("httpMethod") or "").upper()
+
+
+def _event_path(event):
+    return event.get("rawPath") or event.get("path") or ""
+
+
+def _json_body(event):
+    raw_body = event.get("body")
+    if raw_body in (None, ""):
+        return {}
+
+    if event.get("isBase64Encoded"):
+        try:
+            raw_body = base64.b64decode(raw_body).decode("utf-8")
+        except Exception:
+            raise AuthRequestError(400, "INVALID_JSON", "Request body must be valid JSON")
+
+    try:
+        parsed = json.loads(raw_body)
+    except json.JSONDecodeError:
+        raise AuthRequestError(400, "INVALID_JSON", "Request body must be valid JSON")
+
+    if not isinstance(parsed, dict):
+        raise AuthRequestError(400, "INVALID_REQUEST", "Request body must be a JSON object")
+    return parsed
+
+
+def _authorizer_claims(event):
+    request_context = event.get("requestContext") or {}
+    authorizer = request_context.get("authorizer") or {}
+    claims = authorizer.get("lambda") or authorizer.get("claims")
+
+    if isinstance(claims, dict) and (claims.get("userId") or claims.get("sub")):
+        return claims
+    return None
+
+
+def _refresh_token_from_event(event):
+    cookie_name = _cookie_name()
+    cookies = event.get("cookies") or []
+    for cookie in cookies:
+        name, separator, value = str(cookie).partition("=")
+        if separator and name.strip() == cookie_name:
+            return value.split(";", 1)[0]
+
+    cookie_header = _header_value(event.get("headers") or {}, "cookie")
+    if cookie_header:
+        for cookie in cookie_header.split(";"):
+            name, separator, value = cookie.strip().partition("=")
+            if separator and name == cookie_name:
+                return value
+    return None
+
+
+def _session_id_from_bearer(event):
+    try:
+        token = extract_bearer_token(event.get("headers") or {})
+        claims = verify_access_token(token)
+    except AuthTokenError:
+        return None
+    return claims.get("sid")
+
+
+def _session_cookie(refresh_token, max_age):
+    return f"{_cookie_name()}={refresh_token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age={int(max_age)}"
+
+
+def _clear_session_cookie():
+    return f"{_cookie_name()}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0"
+
+
+def _cookie_name():
+    return os.environ.get("AUTH_REFRESH_COOKIE_NAME", "lovv_session")
+
+
+def _refresh_ttl_seconds():
+    try:
+        value = int(os.environ.get("AUTH_REFRESH_TTL_SECONDS", "1209600"))
+    except ValueError:
+        value = 1_209_600
+    return max(60, value)
+
+
+def _hash_token(value):
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _public_user(user, is_new_user=None):
+    result = {
+        "userId": user.get("userId"),
+        "displayName": user.get("displayName") or "Lovv User",
+        "email": user.get("email"),
+        "avatarUrl": user.get("avatarUrl"),
+        "roles": user.get("roles") or ["R-USER"],
+    }
+    if is_new_user is not None:
+        result["isNewUser"] = bool(is_new_user)
+    return result
+
+
+def _session_preference(preference):
+    return {
+        "preferenceId": preference.get("preferenceId"),
+        "countryTrack": preference.get("countryTrack"),
+        "mappedThemes": preference.get("mappedThemes") or [],
+        "preferredRegions": preference.get("preferredRegions") or [],
+        "selectedCityStyle": preference.get("selectedCityStyle"),
+        "pace": preference.get("pace"),
+        "tripDays": preference.get("tripDays"),
+        "companionStyle": preference.get("companionStyle"),
+        "travelStyles": preference.get("travelStyles") or [],
+        "onboardingCompleted": bool(preference.get("onboardingCompleted")),
+        "updatedAt": preference.get("updatedAt"),
+    }
+
+
+def _header_value(headers, name):
+    if not isinstance(headers, dict):
+        return None
+    for key, value in headers.items():
+        if key.lower() == name:
+            return value
+    return None
+
+
+def _source_ip(event):
+    return (((event.get("requestContext") or {}).get("http") or {}).get("sourceIp"))
+
+
+def _user_agent(event):
+    return (((event.get("requestContext") or {}).get("http") or {}).get("userAgent")) or _header_value(event.get("headers") or {}, "user-agent")
+
+
+def _now_epoch():
+    return int(time.time())
+
+
+def _now_iso():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _iso_from_epoch(value):
+    return datetime.fromtimestamp(int(value), tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+class AuthRequestError(Exception):
+    def __init__(self, status_code, code, message):
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code
+        self.message = message
