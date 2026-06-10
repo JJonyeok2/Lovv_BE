@@ -1,6 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Lovv stateful data stack outside the AWS SAM application stack.
 
+# 입력 파라미터: dev Data Stack 생성 시 환경명, DB 설정, VPC CIDR을 지정한다.
 Parameters:
   EnvName:
     Type: String
@@ -51,10 +52,12 @@ Parameters:
     Default: 10.40.0.0/16
     Description: CIDR allowed to connect to MySQL in development.
 
+# 조건: RDS 삭제 보호는 파라미터로 켜고 끌 수 있지만, 기본값은 보호 활성화이다.
 Conditions:
   EnableRDSDeletionProtection: !Equals [!Ref RDSDeletionProtection, "true"]
 
 Resources:
+  # 개발용 VPC: SAM 앱 스택과 분리된 stateful Data Stack 네트워크 경계이다.
   LovvDevVPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -71,6 +74,7 @@ Resources:
         - Key: StackBoundary
           Value: DataStack
 
+  # RDS 배치를 위한 첫 번째 private subnet이다.
   LovvPrivateSubnetA:
     Type: AWS::EC2::Subnet
     Properties:
@@ -88,6 +92,7 @@ Resources:
         - Key: Tier
           Value: private
 
+  # RDS 고가용성 subnet group 구성을 위한 두 번째 private subnet이다.
   LovvPrivateSubnetC:
     Type: AWS::EC2::Subnet
     Properties:
@@ -105,6 +110,7 @@ Resources:
         - Key: Tier
           Value: private
 
+  # RDS MySQL 접근 보안 그룹이다. v0.1은 dev CIDR 기반 접근이며, 이후 Lambda SG 기반 접근으로 강화할 수 있다.
   LovvRDSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -127,6 +133,7 @@ Resources:
         - Key: Environment
           Value: !Ref EnvName
 
+  # RDS DB subnet group: RDS가 public subnet이 아닌 private subnet에 생성되도록 강제한다.
   LovvDBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
@@ -135,6 +142,7 @@ Resources:
         - !Ref LovvPrivateSubnetA
         - !Ref LovvPrivateSubnetC
 
+  # RDS MySQL 원장 DB: 사용자, 소셜 계정, 저장 일정, 일정 항목, 반응 데이터를 저장한다.
   LovvRDSInstance:
     Type: AWS::RDS::DBInstance
     DeletionPolicy: Retain
@@ -155,6 +163,7 @@ Resources:
       VPCSecurityGroups:
         - !Ref LovvRDSSecurityGroup
       MasterUsername: !Ref DBMasterUsername
+      # master password는 CloudFormation 입력값으로 받지 않고 RDS managed secret으로 자동 생성한다.
       ManageMasterUserPassword: true
       Tags:
         - Key: Project
@@ -164,6 +173,7 @@ Resources:
         - Key: StackBoundary
           Value: DataStack
 
+  # 사용자 이벤트 로그 테이블: 사용자/익명 세션 이벤트와 request/recommendation trace를 저장한다.
   UserEventLogsTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -190,6 +200,7 @@ Resources:
         - AttributeName: sk
           KeyType: RANGE
       TimeToLiveSpecification:
+        # TTL 삭제 기준은 애플리케이션이 기록하는 expires_at epoch seconds 값이다.
         AttributeName: expires_at
         Enabled: true
       GlobalSecondaryIndexes:
@@ -223,6 +234,7 @@ Resources:
         - Key: Environment
           Value: !Ref EnvName
 
+  # Agent 실행 상태 테이블: Agent run 단위 상태 이력과 trace 조회를 지원한다.
   AgentRunsTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -249,6 +261,7 @@ Resources:
         - AttributeName: sk
           KeyType: RANGE
       TimeToLiveSpecification:
+        # Agent run 보존 기간은 애플리케이션이 expires_at에 반영한다.
         AttributeName: expires_at
         Enabled: true
       GlobalSecondaryIndexes:
@@ -282,6 +295,7 @@ Resources:
         - Key: Environment
           Value: !Ref EnvName
 
+  # 축제 날짜 검증 캐시 테이블: festival_id + travel_year 기준 검증 결과를 저장한다.
   FestivalVerifyCacheTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -308,6 +322,7 @@ Resources:
         - Key: Environment
           Value: !Ref EnvName
 
+  # 비동기 작업 상태 테이블: job_id 기준 최신 상태 조회와 이력 추적을 지원한다.
   AsyncJobsTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -334,6 +349,7 @@ Resources:
         - Key: Environment
           Value: !Ref EnvName
 
+  # API 로그 테이블: 일자/엔드포인트 그룹별 API 호출 로그와 request_id trace를 저장한다.
   ApiLogsTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -373,6 +389,7 @@ Resources:
         - Key: Environment
           Value: !Ref EnvName
 
+  # 콘텐츠 문서 테이블: 추천 후보 콘텐츠 문서의 정규화 결과를 저장한다. TTL을 적용하지 않는다.
   ContentDocumentsTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -396,6 +413,7 @@ Resources:
         - Key: Environment
           Value: !Ref EnvName
 
+  # 방문 통계 테이블: 도시별/기간별 방문 통계를 저장한다. TTL을 적용하지 않는다.
   VisitorStatisticsTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -419,6 +437,7 @@ Resources:
         - Key: Environment
           Value: !Ref EnvName
 
+  # 이미지 버킷: avatar/content/tmp prefix를 사용하며 직접 public access는 차단한다.
   ImageBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -440,6 +459,7 @@ Resources:
         Rules:
           - Id: ExpireTemporaryUploads
             Status: Enabled
+            # 임시 업로드 객체는 7일 후 만료한다.
             Prefix: tmp/
             ExpirationInDays: 7
       Tags:
@@ -450,6 +470,7 @@ Resources:
         - Key: StackBoundary
           Value: DataStack
 
+  # SAM 앱 스택이 RDS host를 직접 하드코딩하지 않도록 SSM parameter로 공개한다.
   RDSHostParameter:
     Type: AWS::SSM::Parameter
     Properties:
@@ -457,6 +478,7 @@ Resources:
       Type: String
       Value: !GetAtt LovvRDSInstance.Endpoint.Address
 
+  # SAM Lambda VpcConfig 구성을 위한 VPC ID 공개값이다.
   VpcIdParameter:
     Type: AWS::SSM::Parameter
     Properties:
@@ -464,6 +486,7 @@ Resources:
       Type: String
       Value: !Ref LovvDevVPC
 
+  # SAM Lambda VpcConfig 구성을 위한 private subnet A 공개값이다.
   PrivateSubnetAParameter:
     Type: AWS::SSM::Parameter
     Properties:
@@ -471,6 +494,7 @@ Resources:
       Type: String
       Value: !Ref LovvPrivateSubnetA
 
+  # SAM Lambda VpcConfig 구성을 위한 private subnet C 공개값이다.
   PrivateSubnetCParameter:
     Type: AWS::SSM::Parameter
     Properties:
@@ -478,6 +502,7 @@ Resources:
       Type: String
       Value: !Ref LovvPrivateSubnetC
 
+  # RDS 접근 경로 확인과 보안 그룹 연동을 위한 RDS security group 공개값이다.
   RDSSecurityGroupParameter:
     Type: AWS::SSM::Parameter
     Properties:
@@ -485,6 +510,7 @@ Resources:
       Type: String
       Value: !Ref LovvRDSSecurityGroup
 
+  # SAM 앱이 사용할 DB 이름 공개값이다.
   RDSDatabaseNameParameter:
     Type: AWS::SSM::Parameter
     Properties:
@@ -492,6 +518,7 @@ Resources:
       Type: String
       Value: !Ref LovvDbName
 
+  # DB 비밀번호 자체가 아니라 Secrets Manager ARN만 공개한다.
   RDSSecretArnParameter:
     Type: AWS::SSM::Parameter
     Properties:
@@ -499,6 +526,7 @@ Resources:
       Type: String
       Value: !GetAtt LovvRDSInstance.MasterUserSecret.SecretArn
 
+  # DynamoDB 테이블 이름은 환경별 물리명 대신 SSM parameter를 통해 참조한다.
   UserEventLogsTableParameter:
     Type: AWS::SSM::Parameter
     Properties:
@@ -555,6 +583,7 @@ Resources:
       Type: String
       Value: !Ref ImageBucket
 
+# Outputs: 배포 직후 CloudFormation 콘솔/CLI에서 확인할 수 있는 주요 식별자이다.
 Outputs:
   VpcId:
     Description: Development VPC ID.

@@ -1,7 +1,8 @@
--- Lovv Data Stack RDS schema
--- Source: docs/SPEC/db_build_spec.md v0.1
--- Target: MySQL 8, utf8mb4, utf8mb4_0900_ai_ci
+-- Lovv Data Stack RDS 스키마
+-- 기준 문서: docs/SPEC/db_build_spec.md v0.1
+-- 대상 DB: MySQL 8, utf8mb4, utf8mb4_0900_ai_ci
 
+-- 1) users: 사용자 프로필 원장
 CREATE TABLE users (
   id           CHAR(36)     NOT NULL,
   email        VARCHAR(255) NULL,
@@ -12,6 +13,7 @@ CREATE TABLE users (
   KEY idx_users_email (email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- 2) social_accounts: 소셜 로그인 제공자 계정 연결
 CREATE TABLE social_accounts (
   id               CHAR(36)     NOT NULL,
   user_id          CHAR(36)     NOT NULL,
@@ -26,6 +28,7 @@ CREATE TABLE social_accounts (
     ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- 3) itineraries: 사용자가 저장한 최종 여행 일정
 CREATE TABLE itineraries (
   id                  CHAR(36)     NOT NULL,
   user_id             CHAR(36)     NOT NULL,
@@ -45,6 +48,7 @@ CREATE TABLE itineraries (
     ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- 4) itinerary_items: 일정 내 세부 장소와 방문 순서
 CREATE TABLE itinerary_items (
   id                    CHAR(36)     NOT NULL,
   itinerary_id          CHAR(36)     NOT NULL,
@@ -60,6 +64,7 @@ CREATE TABLE itinerary_items (
     ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- 5) plan_reactions: 저장 일정에 대한 사용자 반응
 CREATE TABLE plan_reactions (
   id            CHAR(36)    NOT NULL,
   user_id       CHAR(36)    NOT NULL,

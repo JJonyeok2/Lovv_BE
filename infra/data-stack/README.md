@@ -11,6 +11,11 @@ infra/data-stack/rds/schema.sql
 infra/data-stack/rds/reference_queries.sql
 ```
 
+주석 정책:
+
+- CloudFormation YAML과 SQL 파일에는 한국어 주석을 함께 둔다.
+- JSON parameter example은 JSON 표준상 주석을 넣을 수 없으므로, 설명은 이 README와 `reports/` 문서에 둔다.
+
 ## Development defaults
 
 Development is standardized as:
