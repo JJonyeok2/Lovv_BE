@@ -5,8 +5,8 @@ Description: Lovv backend API for social auth, preferences, map/city, mock recom
 Parameters:
   AllowedCorsOrigin:
     Type: String
-    Default: http://localhost:5173
-    Description: Browser origin allowed to send credentialed API requests.
+    Default: http://localhost:5173,http://127.0.0.1:5173,https://d3nuef0zacpyj.cloudfront.net
+    Description: Comma-separated browser origins allowed to send credentialed API requests.
   MapCityS3Bucket:
     Type: String
     Default: lovv-data-pipeline-dev-925273580929
@@ -40,40 +40,148 @@ Parameters:
     Type: String
     Default: lovv_session
     Description: HttpOnly Secure refresh-session cookie name.
+  AuthRefreshCookieSameSite:
+    Type: String
+    Default: Lax
+    AllowedValues:
+      - Strict
+      - Lax
+      - None
+    Description: SameSite attribute for the refresh-session cookie. Use None with Secure for cross-site frontend domains.
+  AuthRefreshCookieSecure:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Whether the refresh-session cookie includes the Secure attribute.
+  AuthRefreshCookieDomain:
+    Type: String
+    Default: ''
+    Description: Optional Domain attribute for the refresh-session cookie.
+  AuthRefreshCookiePath:
+    Type: String
+    Default: /
+    Description: Path attribute for the refresh-session cookie.
   GoogleClientId:
     Type: String
     Default: ''
     Description: Google OAuth web client id used to verify Google ID token audience.
+  GoogleClientSecret:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Google OAuth web client secret used only for authorization-code exchange.
   KakaoClientId:
     Type: String
     Default: ''
     Description: Kakao OIDC client/app id used to verify Kakao ID token audience.
-  AuroraClusterArn:
+  KakaoClientSecret:
     Type: String
-    Description: Aurora MySQL cluster/resource ARN for RDS Data API access.
-  AuroraSecretArn:
+    Default: ''
+    NoEcho: true
+    Description: Optional Kakao client secret used when Kakao authorization-code exchange requires it.
+  EnableCognitoPoC:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Create Cognito User Pool, Hosted UI, Google IdP, and Kakao OIDC IdP PoC resources when true.
+  CognitoJwtIssuer:
+    Type: String
+    Default: https://replace-with-cognito-issuer.example
+    Description: Existing Cognito JWT issuer for the bridge route when EnableCognitoPoC is false.
+  CognitoJwtAudience:
+    Type: String
+    Default: replace-with-cognito-app-client-id
+    Description: Existing Cognito app client id for the bridge route when EnableCognitoPoC is false.
+  CognitoUserPoolName:
+    Type: String
+    Default: lovv-auth-users
+    Description: Cognito User Pool name for the PoC resources.
+  CognitoUserPoolClientName:
+    Type: String
+    Default: lovv-web
+    Description: Cognito User Pool app client name for Hosted UI auth code flow.
+  CognitoHostedUiDomainPrefix:
+    Type: String
+    Default: lovv-auth-replace-me
+    Description: Globally unique Cognito Hosted UI domain prefix. Replace before deployment.
+  CognitoCallbackUrls:
+    Type: CommaDelimitedList
+    Default: http://localhost:5173/auth/callback/cognito,http://127.0.0.1:5173/auth/callback/cognito,https://d3nuef0zacpyj.cloudfront.net/auth/callback/cognito
+    Description: Comma-separated Cognito OAuth callback URLs. Use HTTPS except localhost/127.0.0.1.
+  CognitoLogoutUrls:
+    Type: CommaDelimitedList
+    Default: http://localhost:5173/,http://127.0.0.1:5173/,https://d3nuef0zacpyj.cloudfront.net/
+    Description: Comma-separated Cognito OAuth logout redirect URLs. Use HTTPS except localhost/127.0.0.1.
+  CognitoGoogleClientId:
+    Type: String
+    Default: ''
+    Description: Google OAuth client id for Cognito Hosted UI.
+  CognitoGoogleClientSecret:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Google OAuth client secret for Cognito Hosted UI. Provide through deploy parameters or CI secrets.
+  CognitoKakaoClientId:
+    Type: String
+    Default: ''
+    Description: Kakao OIDC client id for Cognito Hosted UI.
+  CognitoKakaoClientSecret:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Kakao OIDC client secret for Cognito Hosted UI. Provide through deploy parameters or CI secrets.
+  CognitoKakaoOidcIssuer:
+    Type: String
+    Default: https://kauth.kakao.com
+    Description: Kakao OIDC issuer URL for Cognito OIDC IdP.
+  CognitoKakaoAuthorizeScopes:
+    Type: String
+    Default: openid profile_nickname profile_image account_email
+    Description: Kakao OIDC scopes requested by Cognito.
+  RdsHost:
+    Type: String
+    Description: Existing Lovv Data Stack RDS endpoint host.
+  RdsSecretArn:
     Type: String
     NoEcho: true
-    Description: AWS Secrets Manager secret ARN for Aurora credentials.
-  AuroraDatabaseName:
+    Description: Existing Lovv Data Stack Secrets Manager secret ARN for RDS credentials.
+  RdsDatabaseName:
     Type: String
-    Description: Aurora MySQL database name.
+    Default: lovvdev
+    Description: Existing Lovv Data Stack MySQL database name.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Existing Lovv Data Stack VPC ID for Lambda RDS access.
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet::Id
+    Description: Existing Lovv Data Stack private subnet A ID.
+  PrivateSubnetC:
+    Type: AWS::EC2::Subnet::Id
+    Description: Existing Lovv Data Stack private subnet C ID.
+  AuthSessionsTableName:
+    Type: String
+    Default: lovv_dev_auth_sessions
+    Description: Existing Lovv Data Stack DynamoDB auth sessions table name.
   UsersTableName:
     Type: String
     Default: users
-    Description: Aurora MySQL users table name.
+    Description: MySQL users table name.
   SocialAccountsTableName:
     Type: String
     Default: social_accounts
-    Description: Aurora MySQL social accounts table name.
+    Description: MySQL social accounts table name.
   PreferencesTableName:
     Type: String
-    Default: preferences
-    Description: Aurora MySQL preferences table name.
+    Default: user_preferences
+    Description: MySQL preferences table name.
   SavedPlansTableName:
     Type: String
     Default: saved_plans
-    Description: Aurora MySQL saved plans table name.
+    Description: MySQL saved plans table name.
 
 Globals:
   Function:
@@ -85,7 +193,11 @@ Globals:
     CodeUri: src/
     Environment:
       Variables:
-        CORS_ALLOW_ORIGIN: !Ref AllowedCorsOrigin
+        CORS_ALLOW_ORIGIN: !Select [0, !Split [",", !Ref AllowedCorsOrigin]]
+        CORS_ALLOW_ORIGINS: !Ref AllowedCorsOrigin
+
+Conditions:
+  CreateCognitoPoC: !Equals [!Ref EnableCognitoPoC, 'true']
 
 Resources:
   LovvHttpApi:
@@ -104,40 +216,137 @@ Resources:
           - PUT
           - DELETE
           - OPTIONS
-        AllowOrigins:
-          - !Ref AllowedCorsOrigin
+        AllowOrigins: !Split [",", !Ref AllowedCorsOrigin]
       Auth:
         Authorizers:
           LovvTokenAuthorizer:
             FunctionArn: !GetAtt AuthAuthorizerFunction.Arn
-            AuthorizerPayloadFormatVersion: 2.0
+            AuthorizerPayloadFormatVersion: '2.0'
             EnableSimpleResponses: true
             Identity:
               Headers:
                 - Authorization
+          LovvCognitoJwtAuthorizer:
+            JwtConfiguration:
+              issuer: !If
+                - CreateCognitoPoC
+                - !Sub https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${LovvCognitoUserPool}
+                - !Ref CognitoJwtIssuer
+              audience:
+                - !If
+                  - CreateCognitoPoC
+                  - !Ref LovvCognitoUserPoolClient
+                  - !Ref CognitoJwtAudience
+            IdentitySource: "$request.header.Authorization"
 
-  AuthSessionsTable:
-    Type: AWS::DynamoDB::Table
+  LovvCognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Condition: CreateCognitoPoC
     Properties:
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: sessionId
-          AttributeType: S
-        - AttributeName: refreshTokenHash
-          AttributeType: S
-      KeySchema:
-        - AttributeName: sessionId
-          KeyType: HASH
-      GlobalSecondaryIndexes:
-        - IndexName: RefreshTokenHashIndex
-          KeySchema:
-            - AttributeName: refreshTokenHash
-              KeyType: HASH
-          Projection:
-            ProjectionType: ALL
-      TimeToLiveSpecification:
-        AttributeName: expiresAt
-        Enabled: true
+      UserPoolName: !Ref CognitoUserPoolName
+      AutoVerifiedAttributes:
+        - email
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      Schema:
+        - Name: email
+          Required: false
+          Mutable: true
+        - Name: name
+          Required: false
+          Mutable: true
+        - Name: picture
+          Required: false
+          Mutable: true
+
+  LovvGoogleIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Condition: CreateCognitoPoC
+    Properties:
+      UserPoolId: !Ref LovvCognitoUserPool
+      ProviderName: Google
+      ProviderType: Google
+      ProviderDetails:
+        client_id: !Ref CognitoGoogleClientId
+        client_secret: !Ref CognitoGoogleClientSecret
+        authorize_scopes: profile email openid
+      AttributeMapping:
+        email: email
+        name: name
+        picture: picture
+
+  LovvKakaoIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Condition: CreateCognitoPoC
+    Properties:
+      UserPoolId: !Ref LovvCognitoUserPool
+      ProviderName: Kakao
+      ProviderType: OIDC
+      ProviderDetails:
+        client_id: !Ref CognitoKakaoClientId
+        client_secret: !Ref CognitoKakaoClientSecret
+        attributes_request_method: GET
+        oidc_issuer: !Ref CognitoKakaoOidcIssuer
+        authorize_scopes: !Ref CognitoKakaoAuthorizeScopes
+      AttributeMapping:
+        email: email
+        name: nickname
+        picture: picture
+      IdpIdentifiers:
+        - kakao
+
+  LovvCognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Condition: CreateCognitoPoC
+    DependsOn:
+      - LovvGoogleIdentityProvider
+      - LovvKakaoIdentityProvider
+    Properties:
+      UserPoolId: !Ref LovvCognitoUserPool
+      ClientName: !Ref CognitoUserPoolClientName
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      SupportedIdentityProviders:
+        - Google
+        - Kakao
+      CallbackURLs: !Ref CognitoCallbackUrls
+      LogoutURLs: !Ref CognitoLogoutUrls
+      DefaultRedirectURI: !Select [0, !Ref CognitoCallbackUrls]
+      ReadAttributes:
+        - email
+        - email_verified
+        - name
+        - picture
+      WriteAttributes:
+        - email
+        - name
+        - picture
+
+  LovvCognitoUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Condition: CreateCognitoPoC
+    Properties:
+      Domain: !Ref CognitoHostedUiDomainPrefix
+      UserPoolId: !Ref LovvCognitoUserPool
+
+  AppFunctionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Lovv API Lambda access to the existing Data Stack VPC.
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
 
   AuthFunction:
     Type: AWS::Serverless::Function
@@ -150,17 +359,31 @@ Resources:
           AUTH_TOKEN_TTL_SECONDS: !Ref AuthTokenTtlSeconds
           AUTH_REFRESH_TTL_SECONDS: !Ref AuthRefreshTtlSeconds
           AUTH_REFRESH_COOKIE_NAME: !Ref AuthRefreshCookieName
+          AUTH_REFRESH_COOKIE_SAMESITE: !Ref AuthRefreshCookieSameSite
+          AUTH_REFRESH_COOKIE_SECURE: !Ref AuthRefreshCookieSecure
+          AUTH_REFRESH_COOKIE_DOMAIN: !Ref AuthRefreshCookieDomain
+          AUTH_REFRESH_COOKIE_PATH: !Ref AuthRefreshCookiePath
           AUTH_ISSUER: !Ref AuthIssuer
           AUTH_AUDIENCE: !Ref AuthAudience
-          AUTH_SESSIONS_TABLE_NAME: !Ref AuthSessionsTable
+          AUTH_SESSIONS_TABLE_NAME: !Ref AuthSessionsTableName
           GOOGLE_CLIENT_ID: !Ref GoogleClientId
+          GOOGLE_CLIENT_SECRET: !Ref GoogleClientSecret
           KAKAO_CLIENT_ID: !Ref KakaoClientId
-          AURORA_CLUSTER_ARN: !Ref AuroraClusterArn
-          AURORA_SECRET_ARN: !Ref AuroraSecretArn
-          AURORA_DATABASE_NAME: !Ref AuroraDatabaseName
+          KAKAO_CLIENT_SECRET: !Ref KakaoClientSecret
+          DB_ACCESS_MODE: mysql
+          RDS_HOST: !Ref RdsHost
+          RDS_SECRET_ARN: !Ref RdsSecretArn
+          RDS_DATABASE_NAME: !Ref RdsDatabaseName
           USERS_TABLE_NAME: !Ref UsersTableName
           SOCIAL_ACCOUNTS_TABLE_NAME: !Ref SocialAccountsTableName
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref AppFunctionSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnetA
+          - !Ref PrivateSubnetC
       Policies:
+        - AWSLambdaVPCAccessExecutionRole
         - Statement:
             - Effect: Allow
               Action:
@@ -168,17 +391,12 @@ Resources:
                 - dynamodb:Query
                 - dynamodb:UpdateItem
               Resource:
-                - !GetAtt AuthSessionsTable.Arn
-                - !Sub ${AuthSessionsTable.Arn}/index/RefreshTokenHashIndex
-            - Effect: Allow
-              Action:
-                - rds-data:ExecuteStatement
-                - rds-data:BatchExecuteStatement
-              Resource: !Ref AuroraClusterArn
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuthSessionsTableName}
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuthSessionsTableName}/index/RefreshTokenHashIndex
             - Effect: Allow
               Action:
                 - secretsmanager:GetSecretValue
-              Resource: !Ref AuroraSecretArn
+              Resource: !Ref RdsSecretArn
       Events:
         AuthGoogle:
           Type: HttpApi
@@ -192,14 +410,20 @@ Resources:
             ApiId: !Ref LovvHttpApi
             Method: POST
             Path: /api/v1/auth/kakao
+        AuthCognitoSession:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: POST
+            Path: /api/v1/auth/cognito/session
+            Auth:
+              Authorizer: LovvCognitoJwtAuthorizer
         AuthMe:
           Type: HttpApi
           Properties:
             ApiId: !Ref LovvHttpApi
             Method: GET
             Path: /api/v1/auth/me
-            Auth:
-              Authorizer: LovvTokenAuthorizer
         AuthSession:
           Type: HttpApi
           Properties:
@@ -228,24 +452,27 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: preferences.app.lambda_handler
-      Description: Authenticated user preference API backed by Aurora MySQL.
+      Description: Authenticated user preference API backed by existing Lovv Data Stack MySQL.
       Environment:
         Variables:
-          AURORA_CLUSTER_ARN: !Ref AuroraClusterArn
-          AURORA_SECRET_ARN: !Ref AuroraSecretArn
-          AURORA_DATABASE_NAME: !Ref AuroraDatabaseName
+          DB_ACCESS_MODE: mysql
+          RDS_HOST: !Ref RdsHost
+          RDS_SECRET_ARN: !Ref RdsSecretArn
+          RDS_DATABASE_NAME: !Ref RdsDatabaseName
           PREFERENCES_TABLE_NAME: !Ref PreferencesTableName
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref AppFunctionSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnetA
+          - !Ref PrivateSubnetC
       Policies:
+        - AWSLambdaVPCAccessExecutionRole
         - Statement:
             - Effect: Allow
               Action:
-                - rds-data:ExecuteStatement
-                - rds-data:BatchExecuteStatement
-              Resource: !Ref AuroraClusterArn
-            - Effect: Allow
-              Action:
                 - secretsmanager:GetSecretValue
-              Resource: !Ref AuroraSecretArn
+              Resource: !Ref RdsSecretArn
       Events:
         GetPreferences:
           Type: HttpApi
@@ -253,16 +480,12 @@ Resources:
             ApiId: !Ref LovvHttpApi
             Method: GET
             Path: /api/v1/me/preferences
-            Auth:
-              Authorizer: LovvTokenAuthorizer
         PutPreferences:
           Type: HttpApi
           Properties:
             ApiId: !Ref LovvHttpApi
             Method: PUT
             Path: /api/v1/me/preferences
-            Auth:
-              Authorizer: LovvTokenAuthorizer
 
   AgentCoreFunction:
     Type: AWS::Serverless::Function
@@ -281,24 +504,27 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: saved_plans.app.lambda_handler
-      Description: Authenticated saved-plan API backed by Aurora MySQL.
+      Description: Authenticated saved-plan API backed by existing Lovv Data Stack MySQL.
       Environment:
         Variables:
-          AURORA_CLUSTER_ARN: !Ref AuroraClusterArn
-          AURORA_SECRET_ARN: !Ref AuroraSecretArn
-          AURORA_DATABASE_NAME: !Ref AuroraDatabaseName
+          DB_ACCESS_MODE: mysql
+          RDS_HOST: !Ref RdsHost
+          RDS_SECRET_ARN: !Ref RdsSecretArn
+          RDS_DATABASE_NAME: !Ref RdsDatabaseName
           SAVED_PLANS_TABLE_NAME: !Ref SavedPlansTableName
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref AppFunctionSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnetA
+          - !Ref PrivateSubnetC
       Policies:
+        - AWSLambdaVPCAccessExecutionRole
         - Statement:
             - Effect: Allow
               Action:
-                - rds-data:ExecuteStatement
-                - rds-data:BatchExecuteStatement
-              Resource: !Ref AuroraClusterArn
-            - Effect: Allow
-              Action:
                 - secretsmanager:GetSecretValue
-              Resource: !Ref AuroraSecretArn
+              Resource: !Ref RdsSecretArn
       Events:
         SaveItinerary:
           Type: HttpApi
@@ -306,46 +532,37 @@ Resources:
             ApiId: !Ref LovvHttpApi
             Method: POST
             Path: /api/v1/me/itineraries
-            Auth:
-              Authorizer: LovvTokenAuthorizer
         ListItineraries:
           Type: HttpApi
           Properties:
             ApiId: !Ref LovvHttpApi
             Method: GET
             Path: /api/v1/me/itineraries
-            Auth:
-              Authorizer: LovvTokenAuthorizer
         GetItinerary:
           Type: HttpApi
           Properties:
             ApiId: !Ref LovvHttpApi
             Method: GET
             Path: /api/v1/me/itineraries/{itineraryId}
-            Auth:
-              Authorizer: LovvTokenAuthorizer
         LikeItinerary:
           Type: HttpApi
           Properties:
             ApiId: !Ref LovvHttpApi
             Method: PUT
             Path: /api/v1/me/itineraries/{itineraryId}/reactions/like
-            Auth:
-              Authorizer: LovvTokenAuthorizer
         UnlikeItinerary:
           Type: HttpApi
           Properties:
             ApiId: !Ref LovvHttpApi
             Method: DELETE
             Path: /api/v1/me/itineraries/{itineraryId}/reactions/like
-            Auth:
-              Authorizer: LovvTokenAuthorizer
 
   SmallCitiesFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: small_cities.app.lambda_handler
       Description: Read-only small-city API backed by S3 raw city detail JSON.
+      Timeout: 30
       Environment:
         Variables:
           MAP_CITY_S3_BUCKET: !Ref MapCityS3Bucket
@@ -434,4 +651,20 @@ Outputs:
     Value: !Sub https://${LovvHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
   AuthSessionsTableName:
     Description: DynamoDB table for refresh sessions with TTL.
-    Value: !Ref AuthSessionsTable
+    Value: !Ref AuthSessionsTableName
+  CognitoUserPoolId:
+    Condition: CreateCognitoPoC
+    Description: Cognito User Pool id for the PoC.
+    Value: !Ref LovvCognitoUserPool
+  CognitoUserPoolClientId:
+    Condition: CreateCognitoPoC
+    Description: Cognito User Pool app client id for the PoC.
+    Value: !Ref LovvCognitoUserPoolClient
+  CognitoHostedUiBaseUrl:
+    Condition: CreateCognitoPoC
+    Description: Cognito Hosted UI base URL.
+    Value: !Sub https://${CognitoHostedUiDomainPrefix}.auth.${AWS::Region}.amazoncognito.com
+  CognitoJwtIssuer:
+    Condition: CreateCognitoPoC
+    Description: Cognito JWT issuer for API Gateway JWT authorizer.
+    Value: !Sub https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${LovvCognitoUserPool}

@@ -71,7 +71,7 @@ CREATE TABLE user_preferences (
   CONSTRAINT chk_user_preferences_trip_days
     CHECK (trip_days IS NULL OR trip_days > 0),
   CONSTRAINT chk_user_preferences_country
-    CHECK (country_track IN ('KR', 'JP'))
+    CHECK (country_track IN ('KR', 'JP', 'BOTH'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- 4) itineraries: 사용자가 저장한 최종 여행 일정

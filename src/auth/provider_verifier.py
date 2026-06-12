@@ -1,3 +1,7 @@
+# @file src/auth/provider_verifier.py
+# @description Verifies Google and Kakao identity credentials for Lovv auth.
+# @lastModified 2026-06-12
+
 import dataclasses
 import json
 import os
@@ -8,7 +12,9 @@ import urllib.request
 
 
 GOOGLE_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 KAKAO_TOKENINFO_URL = "https://kauth.kakao.com/oauth/tokeninfo"
+KAKAO_TOKEN_URL = "https://kauth.kakao.com/oauth/token"
 GOOGLE_ISSUERS = {"accounts.google.com", "https://accounts.google.com"}
 KAKAO_ISSUERS = {"https://kauth.kakao.com"}
 
@@ -32,14 +38,22 @@ class ProviderValidationError(Exception):
 
 
 class ProviderVerifier:
-    def verify(self, provider, credential_type, credential, nonce=None, redirect_uri=None):
+    def verify(self, provider, credential_type, credential, nonce=None, redirect_uri=None, code_verifier=None):
         if provider == "google":
-            return self._verify_google(credential_type, credential)
+            return self._verify_google(credential_type, credential, redirect_uri=redirect_uri, code_verifier=code_verifier)
         if provider == "kakao":
-            return self._verify_kakao(credential_type, credential, nonce=nonce)
+            return self._verify_kakao(credential_type, credential, nonce=nonce, redirect_uri=redirect_uri)
         raise ProviderValidationError("UNSUPPORTED_PROVIDER", "Unsupported provider", 400)
 
-    def _verify_google(self, credential_type, credential):
+    def _verify_google(self, credential_type, credential, redirect_uri=None, code_verifier=None):
+        if credential_type == "authorization_code":
+            # Code login is only an acquisition step; final trust still comes from ID token validation.
+            id_token = self._exchange_google_authorization_code(
+                credential,
+                redirect_uri=redirect_uri,
+                code_verifier=code_verifier,
+            )
+            return self._verify_google("id_token", id_token)
         if credential_type != "id_token":
             raise ProviderValidationError("UNSUPPORTED_CREDENTIAL_TYPE", "Unsupported Google credential type", 400)
         if not credential:
@@ -66,7 +80,11 @@ class ProviderVerifier:
             avatar_url=payload.get("picture"),
         )
 
-    def _verify_kakao(self, credential_type, credential, nonce=None):
+    def _verify_kakao(self, credential_type, credential, nonce=None, redirect_uri=None):
+        if credential_type == "authorization_code":
+            # Keep Kakao code login on the same OIDC validation path as direct id_token login.
+            id_token = self._exchange_kakao_authorization_code(credential, redirect_uri=redirect_uri)
+            return self._verify_kakao("id_token", id_token, nonce=nonce)
         if credential_type != "id_token":
             raise ProviderValidationError("UNSUPPORTED_CREDENTIAL_TYPE", "Unsupported Kakao credential type", 400)
         if not credential:
@@ -102,6 +120,44 @@ class ProviderVerifier:
             display_name=display_name,
             avatar_url=avatar_url,
         )
+
+    def _exchange_google_authorization_code(self, code, redirect_uri=None, code_verifier=None):
+        if not code:
+            raise ProviderValidationError("PROVIDER_TOKEN_MISSING", "Provider credential is required", 400)
+        if not redirect_uri:
+            raise ProviderValidationError("INVALID_REQUEST", "redirectUri is required for authorization code login", 400)
+
+        data = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": _required_env("GOOGLE_CLIENT_ID"),
+            "client_secret": _required_env("GOOGLE_CLIENT_SECRET"),
+            "redirect_uri": redirect_uri,
+        }
+        if code_verifier:
+            data["code_verifier"] = code_verifier
+
+        payload = _json_post(os.environ.get("GOOGLE_TOKEN_URL", GOOGLE_TOKEN_URL), data=data)
+        return _id_token_from_token_response(payload)
+
+    def _exchange_kakao_authorization_code(self, code, redirect_uri=None):
+        if not code:
+            raise ProviderValidationError("PROVIDER_TOKEN_MISSING", "Provider credential is required", 400)
+        if not redirect_uri:
+            raise ProviderValidationError("INVALID_REQUEST", "redirectUri is required for authorization code login", 400)
+
+        data = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": _required_env("KAKAO_CLIENT_ID"),
+            "redirect_uri": redirect_uri,
+        }
+        client_secret = os.environ.get("KAKAO_CLIENT_SECRET")
+        if client_secret:
+            data["client_secret"] = client_secret
+
+        payload = _json_post(os.environ.get("KAKAO_TOKEN_URL", KAKAO_TOKEN_URL), data=data)
+        return _id_token_from_token_response(payload)
 
 
 def _json_get(url, headers=None):
@@ -144,6 +200,13 @@ def _required_env(name):
     return value
 
 
+def _id_token_from_token_response(payload):
+    id_token = payload.get("id_token") if isinstance(payload, dict) else None
+    if not id_token:
+        raise ProviderValidationError("PROVIDER_TOKEN_INVALID", "Provider token response did not include an ID token")
+    return id_token
+
+
 def _audience_matches(actual, expected):
     if isinstance(actual, list):
         return expected in actual
@@ -164,3 +227,6 @@ def _truthy(value):
     if isinstance(value, str):
         return value.lower() == "true"
     return False
+
+
+# EOF: src/auth/provider_verifier.py

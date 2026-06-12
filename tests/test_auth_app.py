@@ -30,7 +30,7 @@ class FakeProviderVerifier:
     def __init__(self):
         self.calls = []
 
-    def verify(self, provider, credential_type, credential, nonce=None, redirect_uri=None):
+    def verify(self, provider, credential_type, credential, nonce=None, redirect_uri=None, code_verifier=None):
         self.calls.append(
             {
                 "provider": provider,
@@ -38,6 +38,7 @@ class FakeProviderVerifier:
                 "credential": credential,
                 "nonce": nonce,
                 "redirect_uri": redirect_uri,
+                "code_verifier": code_verifier,
             }
         )
         if credential == "bad-provider-token":
@@ -78,6 +79,12 @@ def make_event(method, path, body=None, headers=None, cookies=None, authorizer_c
     return event
 
 
+def make_cognito_event(method, path, claims):
+    event = make_event(method, path, headers={"authorization": "Bearer cognito-access-token"})
+    event["requestContext"]["authorizer"] = {"jwt": {"claims": claims}}
+    return event
+
+
 class AuthAppTest(unittest.TestCase):
     def setUp(self):
         self.provider_verifier = FakeProviderVerifier()
@@ -110,6 +117,11 @@ class AuthAppTest(unittest.TestCase):
             self.assertEqual(body["expiresIn"], 900)
             self.assertEqual(body["linkedProvider"], "google")
             self.assertTrue(body["user"]["isNewUser"])
+            self.assertEqual(body["user"]["id"], body["user"]["userId"])
+            self.assertEqual(body["user"]["name"], "Google User")
+            self.assertEqual(body["user"]["provider"], "google")
+            self.assertFalse(body["onboardingCompleted"])
+            self.assertIsNone(body["preferences"])
             self.assertNotEqual(body["user"]["userId"], "client-forged")
             self.assertEqual(body["user"]["email"], "user@example.com")
             self.assertEqual(len(self.provider_verifier.calls), 1)
@@ -128,6 +140,42 @@ class AuthAppTest(unittest.TestCase):
             self.assertEqual(claims["roles"], ["R-USER"])
             self.assertNotIn("valid-google-token", response["body"])
 
+    def test_refresh_cookie_attributes_are_environment_configurable_for_cross_site_frontend(self):
+        env = dict(AUTH_ENV)
+        env.update(
+            {
+                "AUTH_REFRESH_COOKIE_SAMESITE": "None",
+                "AUTH_REFRESH_COOKIE_SECURE": "true",
+                "AUTH_REFRESH_COOKIE_DOMAIN": ".lovv.example.com",
+                "AUTH_REFRESH_COOKIE_PATH": "/api/v1/auth",
+            }
+        )
+        with patch.dict(os.environ, env, clear=True):
+            response = self.request(
+                make_event("POST", "/api/v1/auth/google", {"credentialType": "id_token", "credential": "valid-google-token"})
+            )
+
+            set_cookie = response["headers"]["Set-Cookie"]
+
+            self.assertIn("HttpOnly", set_cookie)
+            self.assertIn("Secure", set_cookie)
+            self.assertIn("SameSite=None", set_cookie)
+            self.assertIn("Domain=.lovv.example.com", set_cookie)
+            self.assertIn("Path=/api/v1/auth", set_cookie)
+
+    def test_refresh_cookie_can_disable_secure_for_local_http_development(self):
+        env = dict(AUTH_ENV)
+        env.update({"AUTH_REFRESH_COOKIE_SECURE": "false", "AUTH_REFRESH_COOKIE_SAMESITE": "Lax"})
+        with patch.dict(os.environ, env, clear=True):
+            response = self.request(
+                make_event("POST", "/api/v1/auth/google", {"credentialType": "id_token", "credential": "valid-google-token"})
+            )
+
+            set_cookie = response["headers"]["Set-Cookie"]
+
+            self.assertNotIn("Secure", set_cookie)
+            self.assertIn("SameSite=Lax", set_cookie)
+
     def test_kakao_login_reuses_existing_social_account(self):
         with patch.dict(os.environ, AUTH_ENV, clear=True):
             first = self.request(
@@ -144,7 +192,123 @@ class AuthAppTest(unittest.TestCase):
             self.assertTrue(first_body["user"]["isNewUser"])
             self.assertFalse(second_body["user"]["isNewUser"])
             self.assertEqual(first_body["user"]["userId"], second_body["user"]["userId"])
+            self.assertEqual(first_body["user"]["provider"], "kakao")
+            self.assertFalse(first_body["onboardingCompleted"])
+            self.assertIsNone(first_body["preferences"])
             self.assertEqual(len(self.user_repository.users), 1)
+
+    def test_authorization_code_login_passes_redirect_and_code_verifier_to_provider(self):
+        with patch.dict(os.environ, AUTH_ENV, clear=True):
+            response = self.request(
+                make_event(
+                    "POST",
+                    "/api/v1/auth/google",
+                    {
+                        "credentialType": "authorization_code",
+                        "credential": "google-auth-code",
+                        "redirectUri": "https://lovv.example/auth/callback/google",
+                        "codeVerifier": "google-pkce-verifier",
+                    },
+                )
+            )
+            body = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 200)
+            self.assertEqual(body["linkedProvider"], "google")
+            self.assertEqual(self.provider_verifier.calls[0]["credential_type"], "authorization_code")
+            self.assertEqual(self.provider_verifier.calls[0]["credential"], "google-auth-code")
+            self.assertEqual(
+                self.provider_verifier.calls[0]["redirect_uri"],
+                "https://lovv.example/auth/callback/google",
+            )
+            self.assertEqual(self.provider_verifier.calls[0]["code_verifier"], "google-pkce-verifier")
+
+    def test_cognito_session_bootstraps_lovv_user_from_jwt_authorizer_claims_with_user_role(self):
+        with patch.dict(os.environ, AUTH_ENV, clear=True):
+            response = self.request(
+                make_cognito_event(
+                    "POST",
+                    "/api/v1/auth/cognito/session",
+                    {
+                        "sub": "cognito-sub-123",
+                        "email": "user@example.com",
+                        "email_verified": "true",
+                        "name": "Cognito User",
+                        "picture": "https://images.example.com/cognito.png",
+                        "cognito:groups": ["R-ADMIN", "UNKNOWN-ROLE"],
+                    },
+                )
+            )
+            body = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 200)
+            self.assertTrue(body["authenticated"])
+            self.assertEqual(body["tokenType"], "Bearer")
+            self.assertEqual(body["linkedProvider"], "cognito")
+            self.assertEqual(body["user"]["provider"], "cognito")
+            self.assertEqual(body["user"]["cognitoSub"], "cognito-sub-123")
+            self.assertEqual(body["user"]["email"], "user@example.com")
+            self.assertEqual(body["user"]["emailVerified"], True)
+            self.assertEqual(body["user"]["displayName"], "Cognito User")
+            self.assertEqual(body["user"]["roles"], ["R-USER"])
+            self.assertTrue(body["user"]["isNewUser"])
+            self.assertFalse(body["onboardingCompleted"])
+            self.assertIsNone(body["preferences"])
+            self.assertIn("lovv_session=", response["headers"]["Set-Cookie"])
+            self.assertEqual(len(self.provider_verifier.calls), 0)
+            self.assertIn(("cognito", "cognito-sub-123"), self.user_repository.social_accounts)
+
+            token_claims = verify_access_token(body["accessToken"])
+            self.assertEqual(token_claims["sub"], body["user"]["userId"])
+            self.assertEqual(token_claims["provider"], "cognito")
+            self.assertEqual(token_claims["roles"], ["R-USER"])
+
+    def test_cognito_session_reuses_cognito_subject_and_returns_preferences_alias(self):
+        with patch.dict(os.environ, AUTH_ENV, clear=True):
+            claims = {
+                "sub": "cognito-sub-123",
+                "email": "user@example.com",
+                "email_verified": "true",
+                "name": "Cognito User",
+            }
+            first = self.request(make_cognito_event("POST", "/api/v1/auth/cognito/session", claims))
+            first_body = json.loads(first["body"])
+            user_id = first_body["user"]["userId"]
+            self.preference_repository.upsert(
+                user_id,
+                {
+                    "countryTrack": "KR",
+                    "mappedThemes": ["history_tradition"],
+                    "preferredRegions": ["gyeongbuk"],
+                    "selectedCityStyle": "GYEONGJU",
+                    "pace": "balanced",
+                    "tripDays": 3,
+                    "companionStyle": "solo",
+                    "travelStyles": ["slow_walk"],
+                },
+            )
+
+            second = self.request(make_cognito_event("POST", "/api/v1/auth/cognito/session", claims))
+            second_body = json.loads(second["body"])
+
+            self.assertEqual(first["statusCode"], 200)
+            self.assertEqual(second["statusCode"], 200)
+            self.assertTrue(first_body["user"]["isNewUser"])
+            self.assertFalse(second_body["user"]["isNewUser"])
+            self.assertEqual(second_body["user"]["userId"], user_id)
+            self.assertTrue(second_body["onboardingCompleted"])
+            self.assertEqual(second_body["preferences"]["mappedThemes"], ["history_tradition"])
+            self.assertEqual(second_body["preferences"]["selectedThemeIds"], ["history_tradition"])
+            self.assertEqual(len(self.user_repository.users), 1)
+
+    def test_cognito_session_rejects_missing_authorizer_claims_before_initializing_repositories(self):
+        with patch.dict(os.environ, AUTH_ENV, clear=True):
+            response = handle_request(make_event("POST", "/api/v1/auth/cognito/session"))
+            body = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 401)
+            self.assertEqual(body["error"]["code"], "UNAUTHORIZED")
+            self.assertEqual(response["headers"]["Access-Control-Allow-Origin"], "http://localhost:5173")
 
     def test_login_rejects_invalid_provider_token(self):
         with patch.dict(os.environ, AUTH_ENV, clear=True):
@@ -165,6 +329,15 @@ class AuthAppTest(unittest.TestCase):
             self.assertEqual(response["statusCode"], 404)
             self.assertEqual(body["error"]["code"], "NOT_FOUND")
 
+    def test_me_rejects_missing_bearer_before_initializing_database_repositories(self):
+        with patch.dict(os.environ, AUTH_ENV, clear=True):
+            response = handle_request(make_event("GET", "/api/v1/auth/me"))
+            body = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 401)
+            self.assertEqual(body["error"]["code"], "UNAUTHORIZED")
+            self.assertEqual(response["headers"]["Access-Control-Allow-Origin"], "http://localhost:5173")
+
     def test_me_uses_authorizer_context_and_returns_public_user_shape(self):
         with patch.dict(os.environ, AUTH_ENV, clear=True):
             login = self.request(
@@ -176,15 +349,54 @@ class AuthAppTest(unittest.TestCase):
                 make_event(
                     "GET",
                     "/api/v1/auth/me",
-                    authorizer_context={"userId": user_id, "sessionId": "session-1", "roles": "R-USER"},
+                    authorizer_context={"userId": user_id, "sessionId": "session-1", "roles": "R-USER", "provider": "google"},
                 )
             )
             body = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
             self.assertEqual(body["user"]["userId"], user_id)
+            self.assertEqual(body["user"]["id"], user_id)
             self.assertEqual(body["user"]["displayName"], "Google User")
+            self.assertEqual(body["user"]["name"], "Google User")
+            self.assertEqual(body["user"]["provider"], "google")
             self.assertEqual(body["user"]["roles"], ["R-USER"])
+            self.assertFalse(body["onboardingCompleted"])
+            self.assertIsNone(body["preferences"])
+
+    def test_me_returns_saved_preferences_with_selected_theme_ids_alias(self):
+        with patch.dict(os.environ, AUTH_ENV, clear=True):
+            login = self.request(
+                make_event("POST", "/api/v1/auth/google", {"credentialType": "id_token", "credential": "valid-google-token"})
+            )
+            user_id = json.loads(login["body"])["user"]["userId"]
+            self.preference_repository.upsert(
+                user_id,
+                {
+                    "countryTrack": "KR",
+                    "mappedThemes": ["history_tradition"],
+                    "preferredRegions": ["gyeongbuk"],
+                    "selectedCityStyle": "GYEONGJU",
+                    "pace": "balanced",
+                    "tripDays": 3,
+                    "companionStyle": "solo",
+                    "travelStyles": ["slow_walk"],
+                },
+            )
+
+            response = self.request(
+                make_event(
+                    "GET",
+                    "/api/v1/auth/me",
+                    authorizer_context={"userId": user_id, "sessionId": "session-1", "roles": "R-USER", "provider": "google"},
+                )
+            )
+            body = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 200)
+            self.assertTrue(body["onboardingCompleted"])
+            self.assertEqual(body["preferences"]["mappedThemes"], ["history_tradition"])
+            self.assertEqual(body["preferences"]["selectedThemeIds"], ["history_tradition"])
 
     def test_session_cookie_restores_user_and_refreshes_access_token(self):
         with patch.dict(os.environ, AUTH_ENV, clear=True):
@@ -232,6 +444,7 @@ class AuthAppTest(unittest.TestCase):
             self.assertTrue(body["onboardingCompleted"])
             self.assertEqual(body["preferences"]["countryTrack"], "KR")
             self.assertEqual(body["preferences"]["mappedThemes"], ["history_tradition"])
+            self.assertEqual(body["preferences"]["selectedThemeIds"], ["history_tradition"])
 
     def test_logout_revokes_refresh_session_and_clears_cookie(self):
         with patch.dict(os.environ, AUTH_ENV, clear=True):
@@ -249,6 +462,27 @@ class AuthAppTest(unittest.TestCase):
             self.assertIsNotNone(self.session_repository.sessions[session_id]["revokedAt"])
             self.assertIn("lovv_session=", response["headers"]["Set-Cookie"])
             self.assertIn("Max-Age=0", response["headers"]["Set-Cookie"])
+
+    def test_logout_clear_cookie_uses_same_domain_and_path_attributes(self):
+        env = dict(AUTH_ENV)
+        env.update(
+            {
+                "AUTH_REFRESH_COOKIE_DOMAIN": ".lovv.example.com",
+                "AUTH_REFRESH_COOKIE_PATH": "/api/v1/auth",
+                "AUTH_REFRESH_COOKIE_SAMESITE": "None",
+                "AUTH_REFRESH_COOKIE_SECURE": "true",
+            }
+        )
+        with patch.dict(os.environ, env, clear=True):
+            response = self.request(make_event("POST", "/api/v1/auth/logout"))
+
+            set_cookie = response["headers"]["Set-Cookie"]
+
+            self.assertIn("Domain=.lovv.example.com", set_cookie)
+            self.assertIn("Path=/api/v1/auth", set_cookie)
+            self.assertIn("SameSite=None", set_cookie)
+            self.assertIn("Secure", set_cookie)
+            self.assertIn("Max-Age=0", set_cookie)
 
     def test_logout_with_bearer_only_revokes_session_by_sid(self):
         with patch.dict(os.environ, AUTH_ENV, clear=True):

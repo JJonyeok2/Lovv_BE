@@ -1,12 +1,19 @@
+# @file src/preferences/app.py
+# @description Authenticated user preferences Lambda handler.
+# @lastModified 2026-06-12
+
 import base64
 import json
 from datetime import datetime, timezone
 
 from preferences.repository import RdsDataPreferenceRepository
+from shared.auth import AuthTokenError
+from shared.current_user import authenticated_claims
 from shared.http import error_response, json_response
 
 
 COUNTRY_TRACKS = {"KR", "JP", "BOTH"}
+DEFAULT_COUNTRY_TRACK = "BOTH"
 PACES = {"relaxed", "balanced", "active"}
 FORBIDDEN_OWNER_FIELDS = {"userId", "user_id", "ownerId", "createdBy", "preferenceId", "createdAt", "updatedAt"}
 FORBIDDEN_FREE_TEXT_FIELDS = {"dislikedConstraints", "freeText", "naturalLanguagePreference", "chatText", "messages"}
@@ -29,6 +36,8 @@ def handle_request(event, repository=None):
         return _handle_request(event or {}, repository)
     except PreferenceRequestError as error:
         return error_response(error.status_code, error.code, error.message)
+    except AuthTokenError as error:
+        return error_response(error.status_code, error.code, error.message)
     except Exception:
         return error_response(500, "INTERNAL_ERROR", "Preference API is unavailable")
 
@@ -48,12 +57,12 @@ def _handle_request(event, repository=None):
         preference = repository.get_by_user_id(user_id)
         if not preference or not preference.get("onboardingCompleted"):
             return json_response(200, {"preferences": None, "onboardingCompleted": False})
-        return json_response(200, {"preferences": _public_preference(preference), "onboardingCompleted": True})
+        return json_response(200, {"preferences": public_preference(preference), "onboardingCompleted": True})
 
     if method == "PUT":
         payload = _validate_payload(_json_body(event))
         preference = repository.upsert(user_id, payload, _now_iso())
-        return json_response(200, {"preferences": _public_preference(preference)})
+        return json_response(200, {"preferences": public_preference(preference)})
 
     return error_response(405, "INVALID_METHOD", "Only GET and PUT are supported")
 
@@ -63,13 +72,8 @@ def _validate_payload(body):
     if forbidden:
         raise PreferenceRequestError(400, "VALIDATION_ERROR", "Preference payload contains unsupported fields")
 
-    country_track = body.get("countryTrack")
-    if country_track not in COUNTRY_TRACKS:
-        raise PreferenceRequestError(400, "VALIDATION_ERROR", "countryTrack is required")
-
-    mapped_themes = body.get("mappedThemes")
-    if not isinstance(mapped_themes, list) or not mapped_themes or not all(isinstance(theme, str) and theme for theme in mapped_themes):
-        raise PreferenceRequestError(400, "VALIDATION_ERROR", "mappedThemes is required")
+    country_track = _read_country_track(body)
+    mapped_themes = _read_mapped_themes(body)
 
     if "preferredRegions" in body and not _is_string_list(body.get("preferredRegions")):
         raise PreferenceRequestError(400, "VALIDATION_ERROR", "preferredRegions must be an array")
@@ -92,14 +96,40 @@ def _validate_payload(body):
     }
 
 
-def _public_preference(preference):
+def _read_country_track(body):
+    if "countryTrack" not in body:
+        return DEFAULT_COUNTRY_TRACK
+
+    country_track = body.get("countryTrack")
+    if country_track not in COUNTRY_TRACKS:
+        raise PreferenceRequestError(400, "VALIDATION_ERROR", "countryTrack is invalid")
+    return country_track
+
+
+def _read_mapped_themes(body):
+    mapped_themes = body.get("mappedThemes")
+    if _is_non_empty_string_list(mapped_themes):
+        return mapped_themes
+
+    # Frontend state uses selectedThemeIds; backend storage remains mappedThemes.
+    selected_theme_ids = body.get("selectedThemeIds")
+    if _is_non_empty_string_list(selected_theme_ids):
+        return selected_theme_ids
+
+    raise PreferenceRequestError(400, "VALIDATION_ERROR", "mappedThemes or selectedThemeIds is required")
+
+
+def public_preference(preference):
+    mapped_themes = preference.get("mappedThemes") or []
+
     return {
         "preferenceId": preference.get("preferenceId"),
         "userId": preference.get("userId"),
         "countryTrack": preference.get("countryTrack"),
         "preferredRegions": preference.get("preferredRegions") or [],
         "selectedCityStyle": preference.get("selectedCityStyle"),
-        "mappedThemes": preference.get("mappedThemes") or [],
+        "mappedThemes": mapped_themes,
+        "selectedThemeIds": mapped_themes,
         "pace": preference.get("pace"),
         "tripDays": preference.get("tripDays"),
         "companionStyle": preference.get("companionStyle"),
@@ -111,8 +141,7 @@ def _public_preference(preference):
 
 
 def _current_user_id(event):
-    authorizer = ((event.get("requestContext") or {}).get("authorizer") or {})
-    claims = authorizer.get("lambda") or authorizer.get("claims") or {}
+    claims = authenticated_claims(event)
     user_id = claims.get("userId") or claims.get("sub")
     if not user_id:
         raise PreferenceRequestError(401, "UNAUTHORIZED", "Authentication is required")
@@ -149,5 +178,12 @@ def _is_string_list(value):
     return isinstance(value, list) and all(isinstance(item, str) and item for item in value)
 
 
+def _is_non_empty_string_list(value):
+    return _is_string_list(value) and bool(value)
+
+
 def _now_iso():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+# EOF: src/preferences/app.py

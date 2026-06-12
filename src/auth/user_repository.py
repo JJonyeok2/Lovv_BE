@@ -1,8 +1,12 @@
+# @file src/auth/user_repository.py
+# @description User and social account repository for Lovv auth persistence.
+# @lastModified 2026-06-12
+
 import dataclasses
 import os
 import uuid
 
-from shared.rds_data import RdsDataClient
+from shared.database import create_database_client
 
 
 @dataclasses.dataclass(frozen=True)
@@ -21,7 +25,7 @@ class UserRepositoryError(Exception):
 
 class RdsDataUserRepository:
     def __init__(self, rds_client=None, users_table=None, social_accounts_table=None):
-        self.rds = rds_client or RdsDataClient()
+        self.rds = rds_client or create_database_client()
         self.users_table = users_table or os.environ.get("USERS_TABLE_NAME", "users")
         self.social_accounts_table = social_accounts_table or os.environ.get("SOCIAL_ACCOUNTS_TABLE_NAME", "social_accounts")
 
@@ -237,3 +241,6 @@ def _user_from_row(row):
         "roles": ["R-USER"],
         "status": row.get("status") or "active",
     }
+
+
+# EOF: src/auth/user_repository.py

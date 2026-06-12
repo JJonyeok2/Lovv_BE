@@ -1,13 +1,18 @@
+# @file src/preferences/repository.py
+# @description Preference repository backed by the configured SQL client.
+# @lastModified 2026-06-12
+
 import os
 import uuid
 
-from shared.rds_data import RdsDataClient, json_dumps, json_loads
+from shared.database import create_database_client
+from shared.rds_data import json_dumps, json_loads
 
 
 class RdsDataPreferenceRepository:
     def __init__(self, rds_client=None, table_name=None):
-        self.rds = rds_client or RdsDataClient()
-        self.table_name = table_name or os.environ.get("PREFERENCES_TABLE_NAME", "preferences")
+        self.rds = rds_client or create_database_client()
+        self.table_name = table_name or os.environ.get("PREFERENCES_TABLE_NAME", "user_preferences")
 
     @classmethod
     def from_env(cls):
@@ -124,3 +129,6 @@ def _preference_from_row(row):
         "createdAt": row.get("created_at"),
         "updatedAt": row.get("updated_at"),
     }
+
+
+# EOF: src/preferences/repository.py
