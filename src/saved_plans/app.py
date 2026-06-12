@@ -7,6 +7,8 @@ from saved_plans.repository import (
     RdsDataSavedPlanRepository,
     canonical_snapshot_hash,
 )
+from shared.auth import AuthTokenError
+from shared.current_user import authenticated_claims
 from shared.http import empty_response, error_response, json_response
 
 
@@ -30,6 +32,8 @@ def handle_request(event, repository=None):
     try:
         return _handle_request(event or {}, repository)
     except SavedPlanRequestError as error:
+        return error_response(error.status_code, error.code, error.message)
+    except AuthTokenError as error:
         return error_response(error.status_code, error.code, error.message)
     except Exception:
         return error_response(500, "INTERNAL_ERROR", "Saved plans API is unavailable")
@@ -173,8 +177,7 @@ def _parse_limit(value):
 
 
 def _current_user_id(event):
-    authorizer = ((event.get("requestContext") or {}).get("authorizer") or {})
-    claims = authorizer.get("lambda") or authorizer.get("claims") or {}
+    claims = authenticated_claims(event)
     user_id = claims.get("userId") or claims.get("sub")
     if not user_id:
         raise SavedPlanRequestError(401, "UNAUTHORIZED", "Authentication is required")

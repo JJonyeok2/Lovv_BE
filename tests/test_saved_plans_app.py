@@ -1,12 +1,23 @@
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from saved_plans.app import handle_request
 from saved_plans.repository import InMemorySavedPlanRepository
+from shared.auth import create_access_token
+
+
+AUTH_ENV = {
+    "AUTH_TOKEN_SIGNING_SECRET": "unit-test-signing-secret-with-enough-length",
+    "AUTH_TOKEN_TTL_SECONDS": "900",
+    "AUTH_ISSUER": "lovv-test-auth",
+    "AUTH_AUDIENCE": "lovv-test-api",
+}
 
 
 def make_event(method, path, body=None, user_id="user-1", path_parameters=None, query=None):
@@ -19,6 +30,19 @@ def make_event(method, path, body=None, user_id="user-1", path_parameters=None, 
             "http": {"method": method},
             "authorizer": {"lambda": {"userId": user_id, "roles": "R-USER"}},
         },
+    }
+    if body is not None:
+        event["body"] = json.dumps(body)
+    return event
+
+
+def make_bearer_event(method, path, body=None, token=None, path_parameters=None, query=None):
+    event = {
+        "rawPath": path,
+        "pathParameters": path_parameters or {},
+        "headers": {"content-type": "application/json", "authorization": f"Bearer {token}"},
+        "queryStringParameters": query,
+        "requestContext": {"http": {"method": method}},
     }
     if body is not None:
         event["body"] = json.dumps(body)
@@ -194,6 +218,21 @@ class SavedPlansAppTest(unittest.TestCase):
         self.assertEqual(unliked["statusCode"], 204)
         self.assertEqual(unliked.get("body", ""), "")
         self.assertFalse(self.repository.plans[itinerary_id]["isLiked"])
+
+    def test_list_accepts_bearer_token_without_authorizer_context(self):
+        with patch.dict(os.environ, AUTH_ENV, clear=True):
+            token = create_access_token(user_id="user-1").token
+            handle_request(make_event("POST", "/api/v1/me/itineraries", save_payload()), repository=self.repository)
+
+            response = handle_request(
+                make_bearer_event("GET", "/api/v1/me/itineraries", token=token),
+                repository=self.repository,
+            )
+            body = json.loads(response["body"])
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(len(body["items"]), 1)
+        self.assertEqual(response["headers"]["Access-Control-Allow-Origin"], "http://localhost:5173")
 
 
 if __name__ == "__main__":
