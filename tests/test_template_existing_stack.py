@@ -44,14 +44,26 @@ class ExistingDataStackTemplateTest(unittest.TestCase):
         self.assertIn("table/${AuthSessionsTableName}/index/GSI1RefreshTokenHashLookup", self.template)
 
     def test_saved_plans_routes_use_lovv_token_authorizer(self):
-        self.assertEqual(self.template.count("Authorizer: LovvTokenAuthorizer"), 6)
+        saved_plans_index = self.template.index("SavedPlansFunction:")
+        saved_plans_block = self.template[saved_plans_index : self.template.index("SmallCitiesFunction:")]
+        self.assertEqual(saved_plans_block.count("Authorizer: LovvTokenAuthorizer"), 6)
         for path in (
             "Path: /api/v1/me/itineraries",
             "Path: /api/v1/me/itineraries/{itineraryId}",
             "Path: /api/v1/me/itineraries/{itineraryId}/reactions/like",
         ):
-            path_index = self.template.index(path)
-            self.assertIn("Authorizer: LovvTokenAuthorizer", self.template[path_index : path_index + 220])
+            path_index = saved_plans_block.index(path)
+            self.assertIn("Authorizer: LovvTokenAuthorizer", saved_plans_block[path_index : path_index + 220])
+
+    def test_preferences_routes_use_lovv_token_authorizer(self):
+        preferences_index = self.template.index("PreferenceFunction:")
+        preferences_block = self.template[preferences_index : self.template.index("AgentCoreFunction:")]
+        self.assertEqual(preferences_block.count("Authorizer: LovvTokenAuthorizer"), 2)
+        for path in (
+            "Path: /api/v1/me/preferences",
+        ):
+            path_index = preferences_block.index(path)
+            self.assertIn("Authorizer: LovvTokenAuthorizer", preferences_block[path_index : path_index + 220])
 
     def test_lovv_token_authorizer_allows_http_api_invoke(self):
         self.assertIn("AuthAuthorizerInvokePermission:", self.template)
