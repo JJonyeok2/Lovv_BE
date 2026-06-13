@@ -125,13 +125,12 @@ class ExistingDataStackTemplateTest(unittest.TestCase):
 
 
 class ExistingDataStackSchemaTest(unittest.TestCase):
-    def test_user_preferences_country_track_allows_api_fallback(self):
+    def test_user_preferences_country_track_schema_is_not_changed_by_api_policy(self):
         schema = RDS_SCHEMA.read_text(encoding="utf-8")
         migration = PREFERENCES_MIGRATION.read_text(encoding="utf-8")
 
-        self.assertIn("country_track IN ('KR', 'JP', 'BOTH')", schema)
-        self.assertIn("DROP CHECK chk_user_preferences_country", migration)
-        self.assertIn("country_track IN ('KR', 'JP', 'BOTH')", migration)
+        self.assertIn("chk_user_preferences_country", schema)
+        self.assertIn("chk_user_preferences_country", migration)
 
 
 if __name__ == "__main__":

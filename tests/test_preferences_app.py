@@ -92,15 +92,15 @@ class PreferencesAppTest(unittest.TestCase):
         self.assertEqual(body["preferences"]["mappedThemes"], ["hot_spring_rest", "food_local"])
         self.assertEqual(body["preferences"]["selectedThemeIds"], ["hot_spring_rest", "food_local"])
 
-    def test_put_defaults_country_track_when_missing(self):
+    def test_put_rejects_missing_country_track(self):
         payload = {"selectedThemeIds": ["history_tradition"]}
 
         response = handle_request(make_event("PUT", "/api/v1/me/preferences", payload), repository=self.repository)
         body = json.loads(response["body"])
 
-        self.assertEqual(response["statusCode"], 200)
-        self.assertEqual(self.repository.preferences_by_user["user-1"]["countryTrack"], "BOTH")
-        self.assertEqual(body["preferences"]["countryTrack"], "BOTH")
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual(body["error"]["code"], "VALIDATION_ERROR")
+        self.assertNotIn("user-1", self.repository.preferences_by_user)
 
     def test_get_returns_mapped_themes_and_selected_theme_ids_alias(self):
         self.repository.upsert(
@@ -164,6 +164,20 @@ class PreferencesAppTest(unittest.TestCase):
                 "PUT",
                 "/api/v1/me/preferences",
                 {"countryTrack": "US", "selectedThemeIds": ["history_tradition"]},
+            ),
+            repository=self.repository,
+        )
+        body = json.loads(response["body"])
+
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual(body["error"]["code"], "VALIDATION_ERROR")
+
+    def test_put_rejects_both_country_track(self):
+        response = handle_request(
+            make_event(
+                "PUT",
+                "/api/v1/me/preferences",
+                {"countryTrack": "BOTH", "selectedThemeIds": ["history_tradition"]},
             ),
             repository=self.repository,
         )

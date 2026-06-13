@@ -12,8 +12,7 @@ from shared.current_user import authenticated_claims
 from shared.http import error_response, json_response
 
 
-COUNTRY_TRACKS = {"KR", "JP", "BOTH"}
-DEFAULT_COUNTRY_TRACK = "BOTH"
+COUNTRY_TRACKS = {"KR", "JP"}
 PACES = {"relaxed", "balanced", "active"}
 FORBIDDEN_OWNER_FIELDS = {"userId", "user_id", "ownerId", "createdBy", "preferenceId", "createdAt", "updatedAt"}
 FORBIDDEN_FREE_TEXT_FIELDS = {"dislikedConstraints", "freeText", "naturalLanguagePreference", "chatText", "messages"}
@@ -98,7 +97,7 @@ def _validate_payload(body):
 
 def _read_country_track(body):
     if "countryTrack" not in body:
-        return DEFAULT_COUNTRY_TRACK
+        raise PreferenceRequestError(400, "VALIDATION_ERROR", "countryTrack is required")
 
     country_track = body.get("countryTrack")
     if country_track not in COUNTRY_TRACKS:
