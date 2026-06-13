@@ -400,7 +400,7 @@ Resources:
                 - dynamodb:UpdateItem
               Resource:
                 - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuthSessionsTableName}
-                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuthSessionsTableName}/index/RefreshTokenHashIndex
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuthSessionsTableName}/index/GSI1RefreshTokenHashLookup
             - Effect: Allow
               Action:
                 - secretsmanager:GetSecretValue

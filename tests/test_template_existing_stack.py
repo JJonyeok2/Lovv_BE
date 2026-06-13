@@ -41,7 +41,7 @@ class ExistingDataStackTemplateTest(unittest.TestCase):
     def test_api_stack_does_not_create_duplicate_auth_session_table(self):
         self.assertNotIn("AuthSessionsTable:\n    Type: AWS::DynamoDB::Table", self.template)
         self.assertIn("table/${AuthSessionsTableName}", self.template)
-        self.assertIn("table/${AuthSessionsTableName}/index/RefreshTokenHashIndex", self.template)
+        self.assertIn("table/${AuthSessionsTableName}/index/GSI1RefreshTokenHashLookup", self.template)
 
     def test_saved_plans_routes_use_lovv_token_authorizer(self):
         self.assertEqual(self.template.count("Authorizer: LovvTokenAuthorizer"), 6)

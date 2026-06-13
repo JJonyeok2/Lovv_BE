@@ -46,7 +46,7 @@ class DynamoDbSessionRepository:
     def find_active_by_refresh_hash(self, refresh_token_hash, now_epoch=None):
         now = int(now_epoch if now_epoch is not None else time.time())
         response = self.table.query(
-            IndexName="RefreshTokenHashIndex",
+            IndexName="GSI1RefreshTokenHashLookup",
             KeyConditionExpression="#refreshTokenHash = :refreshTokenHash",
             ExpressionAttributeNames={"#refreshTokenHash": "refreshTokenHash"},
             ExpressionAttributeValues={":refreshTokenHash": refresh_token_hash},
