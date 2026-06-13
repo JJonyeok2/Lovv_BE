@@ -496,12 +496,16 @@ Resources:
             ApiId: !Ref LovvHttpApi
             Method: GET
             Path: /api/v1/me/preferences
+            Auth:
+              Authorizer: LovvTokenAuthorizer
         PutPreferences:
           Type: HttpApi
           Properties:
             ApiId: !Ref LovvHttpApi
             Method: PUT
             Path: /api/v1/me/preferences
+            Auth:
+              Authorizer: LovvTokenAuthorizer
 
   AgentCoreFunction:
     Type: AWS::Serverless::Function
