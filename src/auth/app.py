@@ -1,10 +1,11 @@
 # @file src/auth/app.py
 # @description Social auth/session Lambda handler for Lovv API.
-# @lastModified 2026-06-12
+# @lastModified 2026-06-13
 
 import base64
 import hashlib
 import json
+import logging
 import os
 import secrets
 import time
@@ -19,6 +20,9 @@ from shared.auth import AuthTokenError, create_access_token, extract_bearer_toke
 from shared.http import empty_response, error_response, json_response
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 def lambda_handler(event, context):
     return handle_request(event or {})
 
@@ -30,7 +34,12 @@ def handle_request(event, provider_verifier=None, user_repository=None, session_
         return error_response(error.status_code, error.code, error.message)
     except AuthTokenError as error:
         return error_response(error.status_code, error.code, error.message)
-    except Exception:
+    except Exception as error:
+        LOGGER.exception(
+            "Unhandled auth API error: %s: %s",
+            error.__class__.__name__,
+            _safe_error_message(error),
+        )
         return error_response(500, "INTERNAL_ERROR", "Internal server error")
 
 
@@ -388,6 +397,11 @@ def _claim_bool(value):
     if isinstance(value, str):
         return value.strip().lower() in ("1", "true", "yes")
     return False
+
+
+def _safe_error_message(error):
+    message = str(error).replace("\n", " ").replace("\r", " ").strip()
+    return message[:300] if message else "<empty>"
 
 
 def _session_cookie(refresh_token, max_age):

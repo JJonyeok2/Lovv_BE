@@ -41,10 +41,23 @@ class ExistingDataStackTemplateTest(unittest.TestCase):
     def test_api_stack_does_not_create_duplicate_auth_session_table(self):
         self.assertNotIn("AuthSessionsTable:\n    Type: AWS::DynamoDB::Table", self.template)
         self.assertIn("table/${AuthSessionsTableName}", self.template)
-        self.assertIn("table/${AuthSessionsTableName}/index/RefreshTokenHashIndex", self.template)
+        self.assertIn("table/${AuthSessionsTableName}/index/GSI1RefreshTokenHashLookup", self.template)
 
-    def test_protected_routes_do_not_use_gateway_authorizer_that_drops_cors_errors(self):
-        self.assertNotIn("Authorizer: LovvTokenAuthorizer", self.template)
+    def test_saved_plans_routes_use_lovv_token_authorizer(self):
+        self.assertEqual(self.template.count("Authorizer: LovvTokenAuthorizer"), 6)
+        for path in (
+            "Path: /api/v1/me/itineraries",
+            "Path: /api/v1/me/itineraries/{itineraryId}",
+            "Path: /api/v1/me/itineraries/{itineraryId}/reactions/like",
+        ):
+            path_index = self.template.index(path)
+            self.assertIn("Authorizer: LovvTokenAuthorizer", self.template[path_index : path_index + 220])
+
+    def test_lovv_token_authorizer_allows_http_api_invoke(self):
+        self.assertIn("AuthAuthorizerInvokePermission:", self.template)
+        self.assertIn("Type: AWS::Lambda::Permission", self.template)
+        self.assertIn("FunctionName: !Ref AuthAuthorizerFunction", self.template)
+        self.assertIn("${LovvHttpApi}/authorizers/*", self.template)
 
     def test_template_accepts_comma_separated_cors_origins(self):
         self.assertIn("CORS_ALLOW_ORIGINS: !Ref AllowedCorsOrigin", self.template)

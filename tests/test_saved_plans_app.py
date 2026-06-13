@@ -160,6 +160,10 @@ class SavedPlansAppTest(unittest.TestCase):
         detail_day = detail_body["itinerary"]["days"][0]
         list_day = list_body["items"][0]["itinerary"]["days"][0]
         self.assertEqual(saved["statusCode"], 201)
+        self.assertEqual(detail_body["userId"], "user-1")
+        self.assertEqual(detail_body["ownerId"], "user-1")
+        self.assertEqual(list_body["items"][0]["userId"], "user-1")
+        self.assertEqual(list_body["items"][0]["ownerId"], "user-1")
         self.assertEqual(detail_day["stops"][0]["title"], "경포호")
         self.assertEqual(detail_day["items"][0]["title"], "경포호")
         self.assertEqual(list_day["stops"][0]["title"], "경포호")

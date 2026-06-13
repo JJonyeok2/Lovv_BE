@@ -10,7 +10,7 @@ Lovv용 AWS SAM 백엔드입니다.
 - 사용자 선호도: `GET /api/v1/me/preferences`, `PUT /api/v1/me/preferences`
 - 지도 / 도시: 기존 `GET /api/small-cities`, `GET /api/small-cities/{cityId}`, `GET /api/small-cities/{cityId}/places`와 `/api/v1` alias, marker projection
 - AgentCore mock: `POST /api/v1/recommendations`
-- 저장 일정: `POST /api/v1/me/itineraries`, `GET /api/v1/me/itineraries`, `GET /api/v1/me/itineraries/{itineraryId}`, like/unlike routes
+- 저장 일정: `POST /api/v1/me/itineraries`, `GET /api/v1/me/itineraries`, `GET /api/v1/me/itineraries/{itineraryId}`, `DELETE /api/v1/me/itineraries/{itineraryId}`, like/unlike routes
 
 이번 구현 범위에서 제외된 항목은 다음과 같습니다.
 
@@ -33,7 +33,7 @@ Lovv용 AWS SAM 백엔드입니다.
 infra/data-stack/rds/schema.sql
 ```
 
-현재 saved-plan repository는 아직 `saved_plans` API 테이블 shape를 기대합니다. 기존 Data Stack의 `itineraries` / `itinerary_items` shape와 정합을 맞추기 전까지 저장 일정 write 흐름은 production-ready로 보지 않습니다.
+저장 일정 API는 Data Stack RDS의 `itineraries`, `itinerary_items`, `plan_reactions` 테이블 shape에 맞춰 동작합니다. 일정 삭제는 `deleted_at` 기반 soft delete이며, 삭제된 일정은 목록/상세/반응 흐름에서 제외됩니다.
 
 ## 인증 모델
 
@@ -68,9 +68,14 @@ Lambda는 `image_url`을 반환하기 전에 HTTP(S) URL인지 검증하며, 지
 
 ```bash
 python3 -m unittest discover -s tests
+python3 scripts/local_api_smoke.py
 sam validate
+sam validate --lint
+git diff --check
 sam build
 ```
+
+`scripts/local_api_smoke.py`는 외부 provider나 실제 secret을 사용하지 않고 handler 레벨에서 로그인, preferences 저장/조회, small-cities list/detail/places, saved plans 저장/list/detail/delete, like/unlike 흐름을 1회 검증합니다.
 
 ## 배포 파라미터
 

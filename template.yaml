@@ -180,8 +180,16 @@ Parameters:
     Description: MySQL preferences table name.
   SavedPlansTableName:
     Type: String
-    Default: saved_plans
-    Description: MySQL saved plans table name.
+    Default: itineraries
+    Description: MySQL itineraries table name for saved plans.
+  ItineraryItemsTableName:
+    Type: String
+    Default: itinerary_items
+    Description: MySQL itinerary items table name.
+  PlanReactionsTableName:
+    Type: String
+    Default: plan_reactions
+    Description: MySQL plan reactions table name.
 
 Globals:
   Function:
@@ -392,7 +400,7 @@ Resources:
                 - dynamodb:UpdateItem
               Resource:
                 - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuthSessionsTableName}
-                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuthSessionsTableName}/index/RefreshTokenHashIndex
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuthSessionsTableName}/index/GSI1RefreshTokenHashLookup
             - Effect: Allow
               Action:
                 - secretsmanager:GetSecretValue
@@ -447,6 +455,14 @@ Resources:
           AUTH_TOKEN_SIGNING_SECRET: !Ref AuthTokenSigningSecret
           AUTH_ISSUER: !Ref AuthIssuer
           AUTH_AUDIENCE: !Ref AuthAudience
+
+  AuthAuthorizerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref AuthAuthorizerFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${LovvHttpApi}/authorizers/*
 
   PreferenceFunction:
     Type: AWS::Serverless::Function
@@ -512,6 +528,8 @@ Resources:
           RDS_SECRET_ARN: !Ref RdsSecretArn
           RDS_DATABASE_NAME: !Ref RdsDatabaseName
           SAVED_PLANS_TABLE_NAME: !Ref SavedPlansTableName
+          ITINERARY_ITEMS_TABLE_NAME: !Ref ItineraryItemsTableName
+          PLAN_REACTIONS_TABLE_NAME: !Ref PlanReactionsTableName
       VpcConfig:
         SecurityGroupIds:
           - !Ref AppFunctionSecurityGroup
@@ -532,36 +550,48 @@ Resources:
             ApiId: !Ref LovvHttpApi
             Method: POST
             Path: /api/v1/me/itineraries
+            Auth:
+              Authorizer: LovvTokenAuthorizer
         ListItineraries:
           Type: HttpApi
           Properties:
             ApiId: !Ref LovvHttpApi
             Method: GET
             Path: /api/v1/me/itineraries
+            Auth:
+              Authorizer: LovvTokenAuthorizer
         GetItinerary:
           Type: HttpApi
           Properties:
             ApiId: !Ref LovvHttpApi
             Method: GET
             Path: /api/v1/me/itineraries/{itineraryId}
+            Auth:
+              Authorizer: LovvTokenAuthorizer
         DeleteItinerary:
           Type: HttpApi
           Properties:
             ApiId: !Ref LovvHttpApi
             Method: DELETE
             Path: /api/v1/me/itineraries/{itineraryId}
+            Auth:
+              Authorizer: LovvTokenAuthorizer
         LikeItinerary:
           Type: HttpApi
           Properties:
             ApiId: !Ref LovvHttpApi
             Method: PUT
             Path: /api/v1/me/itineraries/{itineraryId}/reactions/like
+            Auth:
+              Authorizer: LovvTokenAuthorizer
         UnlikeItinerary:
           Type: HttpApi
           Properties:
             ApiId: !Ref LovvHttpApi
             Method: DELETE
             Path: /api/v1/me/itineraries/{itineraryId}/reactions/like
+            Auth:
+              Authorizer: LovvTokenAuthorizer
 
   SmallCitiesFunction:
     Type: AWS::Serverless::Function

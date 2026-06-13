@@ -15,9 +15,11 @@ class IdempotencyConflictError(Exception):
 
 
 class RdsDataSavedPlanRepository:
-    def __init__(self, rds_client=None, table_name=None):
+    def __init__(self, rds_client=None, table_name=None, item_table_name=None, reaction_table_name=None):
         self.rds = rds_client or create_database_client()
-        self.table_name = table_name or os.environ.get("SAVED_PLANS_TABLE_NAME", "saved_plans")
+        self.table_name = table_name or os.environ.get("SAVED_PLANS_TABLE_NAME", "itineraries")
+        self.item_table_name = item_table_name or os.environ.get("ITINERARY_ITEMS_TABLE_NAME", "itinerary_items")
+        self.reaction_table_name = reaction_table_name or os.environ.get("PLAN_REACTIONS_TABLE_NAME", "plan_reactions")
 
     @classmethod
     def from_env(cls):
@@ -49,17 +51,20 @@ class RdsDataSavedPlanRepository:
         self.rds.execute(
             f"""
             INSERT INTO {self.table_name}
-              (id, user_id, source_recommendation_id, idempotency_key, snapshot_hash, title, summary,
-               destination_json, trip_type, duration_label, themes_json, conditions_snapshot_json,
-               request_summary, itinerary_json, alternative_itinerary_json, is_liked, saved_at, updated_at)
+              (id, user_id, title, summary, duration_label, festival_choice, intensity_label,
+               preference_snapshot, request_summary, source_recommendation_id, idempotency_key,
+               snapshot_hash, destination_json, trip_type, themes_json, conditions_snapshot_json,
+               alternative_itinerary_json, saved_at, created_at, updated_at)
             VALUES
-              (:id, :user_id, :source_recommendation_id, :idempotency_key, :snapshot_hash, :title, :summary,
-               :destination_json, :trip_type, :duration_label, :themes_json, :conditions_snapshot_json,
-               :request_summary, :itinerary_json, :alternative_itinerary_json, :is_liked, :saved_at, :updated_at)
+              (:id, :user_id, :title, :summary, :duration_label, :festival_choice, :intensity_label,
+               :preference_snapshot, :request_summary, :source_recommendation_id, :idempotency_key,
+               :snapshot_hash, :destination_json, :trip_type, :themes_json, :conditions_snapshot_json,
+               :alternative_itinerary_json, :saved_at, :created_at, :updated_at)
             """,
             _row_params(plan),
             include_result_metadata=False,
         )
+        self._insert_itinerary_items(plan)
         return plan, False
 
     def _restore(self, plan_id, user_id, payload, snapshot_hash, now):
@@ -72,15 +77,16 @@ class RdsDataSavedPlanRepository:
                 snapshot_hash = :snapshot_hash,
                 title = :title,
                 summary = :summary,
+                festival_choice = :festival_choice,
+                intensity_label = :intensity_label,
+                preference_snapshot = :preference_snapshot,
                 destination_json = :destination_json,
                 trip_type = :trip_type,
                 duration_label = :duration_label,
                 themes_json = :themes_json,
                 conditions_snapshot_json = :conditions_snapshot_json,
                 request_summary = :request_summary,
-                itinerary_json = :itinerary_json,
                 alternative_itinerary_json = :alternative_itinerary_json,
-                is_liked = :is_liked,
                 saved_at = :saved_at,
                 updated_at = :updated_at,
                 deleted_at = NULL
@@ -89,29 +95,54 @@ class RdsDataSavedPlanRepository:
             _row_params(plan),
             include_result_metadata=False,
         )
+        self._delete_reactions(plan_id, user_id)
+        self._replace_itinerary_items(plan)
         return plan
 
     def list_by_user(self, user_id, limit=20):
         rows = self.rds.fetch_all(
             f"""
-            SELECT id, source_recommendation_id, title, summary, destination_json, trip_type, duration_label,
-                   themes_json, itinerary_json, is_liked, saved_at, updated_at
-            FROM {self.table_name}
-            WHERE user_id = :user_id
-              AND deleted_at IS NULL
-            ORDER BY saved_at DESC
+            SELECT i.id, i.user_id, i.source_recommendation_id, i.idempotency_key, i.snapshot_hash,
+                   i.title, i.summary, i.destination_json, i.trip_type, i.duration_label,
+                   i.festival_choice, i.intensity_label, i.preference_snapshot,
+                   i.themes_json, i.conditions_snapshot_json, i.request_summary,
+                   i.alternative_itinerary_json, i.saved_at, i.updated_at, i.deleted_at,
+                   EXISTS (
+                     SELECT 1
+                     FROM {self.reaction_table_name} pr
+                     WHERE pr.user_id = :user_id
+                       AND pr.itinerary_id = i.id
+                       AND pr.reaction_type = 'like'
+                   ) AS is_liked
+            FROM {self.table_name} i
+            WHERE i.user_id = :user_id
+              AND i.deleted_at IS NULL
+            ORDER BY i.saved_at DESC
             LIMIT :limit
             """,
             {"user_id": user_id, "limit": limit},
         )
-        return [_summary_from_row(row) for row in rows]
+        return [_summary(self._with_itinerary_items(_plan_from_row(row))) for row in rows]
 
     def get_owned(self, user_id, plan_id):
         row = self.rds.fetch_one(
-            f"SELECT * FROM {self.table_name} WHERE id = :id AND user_id = :user_id AND deleted_at IS NULL",
+            f"""
+            SELECT i.*,
+                   EXISTS (
+                     SELECT 1
+                     FROM {self.reaction_table_name} pr
+                     WHERE pr.user_id = :user_id
+                       AND pr.itinerary_id = i.id
+                       AND pr.reaction_type = 'like'
+                   ) AS is_liked
+            FROM {self.table_name} i
+            WHERE i.id = :id
+              AND i.user_id = :user_id
+              AND i.deleted_at IS NULL
+            """,
             {"id": plan_id, "user_id": user_id},
         )
-        return _plan_from_row(row) if row else None
+        return self._with_itinerary_items(_plan_from_row(row)) if row else None
 
     def delete_owned(self, user_id, plan_id, now):
         row = self.rds.fetch_one(
@@ -138,18 +169,95 @@ class RdsDataSavedPlanRepository:
         if not plan:
             return None, False
         changed = bool(plan.get("isLiked")) != bool(liked)
-        self.rds.execute(
-            f"""
-            UPDATE {self.table_name}
-            SET is_liked = :is_liked, updated_at = :updated_at
-            WHERE id = :id AND user_id = :user_id AND deleted_at IS NULL
-            """,
-            {"id": plan_id, "user_id": user_id, "is_liked": bool(liked), "updated_at": now},
-            include_result_metadata=False,
-        )
+        if liked:
+            self.rds.execute(
+                f"""
+                INSERT INTO {self.reaction_table_name}
+                  (id, user_id, itinerary_id, reaction_type, created_at, updated_at)
+                VALUES
+                  (:reaction_id, :user_id, :itinerary_id, 'like', :created_at, :updated_at)
+                ON DUPLICATE KEY UPDATE
+                  reaction_type = VALUES(reaction_type),
+                  updated_at = VALUES(updated_at)
+                """,
+                {
+                    "reaction_id": str(uuid.uuid4()),
+                    "user_id": user_id,
+                    "itinerary_id": plan_id,
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                include_result_metadata=False,
+            )
+        else:
+            self.rds.execute(
+                f"""
+                DELETE FROM {self.reaction_table_name}
+                WHERE user_id = :user_id
+                  AND itinerary_id = :itinerary_id
+                  AND reaction_type = 'like'
+                """,
+                {"user_id": user_id, "itinerary_id": plan_id},
+                include_result_metadata=False,
+            )
         plan["isLiked"] = bool(liked)
         plan["updatedAt"] = now
         return plan, changed
+
+    def _replace_itinerary_items(self, plan):
+        self.rds.execute(
+            f"DELETE FROM {self.item_table_name} WHERE itinerary_id = :itinerary_id",
+            {"itinerary_id": plan["itineraryId"]},
+            include_result_metadata=False,
+        )
+        self._insert_itinerary_items(plan)
+
+    def _insert_itinerary_items(self, plan):
+        for item in _item_rows(plan["itineraryId"], plan.get("itinerary") or {}):
+            self.rds.execute(
+                f"""
+                INSERT INTO {self.item_table_name}
+                  (id, itinerary_id, day_index, sort_order, time_slot, place_name,
+                   content_id, place_id, latitude, longitude, move_hint,
+                   recommendation_reason, body, source_badges)
+                VALUES
+                  (:id, :itinerary_id, :day_index, :sort_order, :time_slot, :place_name,
+                   :content_id, :place_id, :latitude, :longitude, :move_hint,
+                   :recommendation_reason, :body, :source_badges)
+                """,
+                item,
+                include_result_metadata=False,
+            )
+
+    def _with_itinerary_items(self, plan):
+        if not plan:
+            return None
+        plan["itinerary"] = _itinerary_from_item_rows(self._fetch_itinerary_items(plan["itineraryId"]))
+        return plan
+
+    def _fetch_itinerary_items(self, plan_id):
+        return self.rds.fetch_all(
+            f"""
+            SELECT id, itinerary_id, day_index, sort_order, time_slot, place_name,
+                   content_id, place_id, latitude, longitude, move_hint,
+                   recommendation_reason, body, source_badges
+            FROM {self.item_table_name}
+            WHERE itinerary_id = :itinerary_id
+            ORDER BY day_index ASC, sort_order ASC
+            """,
+            {"itinerary_id": plan_id},
+        )
+
+    def _delete_reactions(self, plan_id, user_id):
+        self.rds.execute(
+            f"""
+            DELETE FROM {self.reaction_table_name}
+            WHERE itinerary_id = :itinerary_id
+              AND user_id = :user_id
+            """,
+            {"itinerary_id": plan_id, "user_id": user_id},
+            include_result_metadata=False,
+        )
 
     def _find_by_idempotency_key(self, user_id, idempotency_key):
         row = self.rds.fetch_one(
@@ -299,6 +407,9 @@ def _build_plan(plan_id, user_id, payload, snapshot_hash, now):
         "destination": payload.get("destination") or {},
         "tripType": payload.get("tripType"),
         "durationLabel": payload.get("durationLabel"),
+        "festivalChoice": payload.get("festivalChoice"),
+        "intensityLabel": payload.get("intensityLabel"),
+        "preferenceSnapshot": payload.get("preferenceSnapshot") or {},
         "themes": payload.get("themes") or [],
         "conditionsSnapshot": payload.get("conditionsSnapshot") or {},
         "requestSummary": payload.get("requestSummary"),
@@ -315,12 +426,16 @@ def _summary(plan):
     return {
         "itineraryId": plan.get("itineraryId"),
         "sourceRecommendationId": plan.get("sourceRecommendationId"),
+        "userId": plan.get("userId"),
+        "ownerId": plan.get("userId"),
         "title": plan.get("title"),
         "summary": plan.get("summary"),
         "destination": plan.get("destination") or {},
         "tripType": plan.get("tripType"),
         "durationLabel": plan.get("durationLabel"),
         "themes": plan.get("themes") or [],
+        "festivalChoice": plan.get("festivalChoice"),
+        "intensityLabel": plan.get("intensityLabel"),
         "itinerary": _itinerary_with_entry_aliases(plan.get("itinerary") or {}),
         "isLiked": bool(plan.get("isLiked")),
         "savedAt": plan.get("savedAt"),
@@ -340,13 +455,15 @@ def _row_params(plan):
         "destination_json": json_dumps(plan.get("destination") or {}),
         "trip_type": plan.get("tripType"),
         "duration_label": plan.get("durationLabel"),
+        "festival_choice": plan.get("festivalChoice"),
+        "intensity_label": plan.get("intensityLabel"),
+        "preference_snapshot": json_dumps(plan.get("preferenceSnapshot") or {}),
         "themes_json": json_dumps(plan.get("themes") or []),
         "conditions_snapshot_json": json_dumps(plan.get("conditionsSnapshot") or {}),
         "request_summary": plan.get("requestSummary"),
-        "itinerary_json": json_dumps(plan.get("itinerary") or {}),
         "alternative_itinerary_json": json_dumps(plan.get("alternativeItinerary")),
-        "is_liked": bool(plan.get("isLiked")),
         "saved_at": plan.get("savedAt"),
+        "created_at": plan.get("savedAt"),
         "updated_at": plan.get("updatedAt"),
     }
 
@@ -369,6 +486,9 @@ def _plan_from_row(row):
         "destination": json_loads(row.get("destination_json"), {}),
         "tripType": row.get("trip_type"),
         "durationLabel": row.get("duration_label"),
+        "festivalChoice": row.get("festival_choice"),
+        "intensityLabel": row.get("intensity_label"),
+        "preferenceSnapshot": json_loads(row.get("preference_snapshot"), {}),
         "themes": json_loads(row.get("themes_json"), []),
         "conditionsSnapshot": json_loads(row.get("conditions_snapshot_json"), {}),
         "requestSummary": row.get("request_summary"),
@@ -379,6 +499,96 @@ def _plan_from_row(row):
         "updatedAt": row.get("updated_at"),
         "deletedAt": row.get("deleted_at"),
     }
+
+
+def _item_rows(plan_id, itinerary):
+    days = itinerary.get("days") if isinstance(itinerary, dict) else []
+    if not isinstance(days, list):
+        return []
+
+    rows = []
+    for day_position, day in enumerate(days, start=1):
+        if not isinstance(day, dict):
+            continue
+        day_index = _positive_int(day.get("day") or day.get("dayIndex"), day_position)
+        entries = _day_entries(day)
+        for entry_position, entry in enumerate(entries, start=1):
+            if not isinstance(entry, dict):
+                continue
+            rows.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "itinerary_id": plan_id,
+                    "day_index": day_index,
+                    "sort_order": _positive_int(entry.get("sortOrder") or entry.get("sort_order"), entry_position),
+                    "time_slot": entry.get("time") or entry.get("timeSlot") or entry.get("time_slot"),
+                    "place_name": entry.get("title") or entry.get("placeName") or entry.get("place_name"),
+                    "content_id": entry.get("contentId") or entry.get("content_id"),
+                    "place_id": entry.get("placeId") or entry.get("place_id"),
+                    "latitude": entry.get("latitude"),
+                    "longitude": entry.get("longitude"),
+                    "move_hint": entry.get("move") or entry.get("moveHint") or entry.get("move_hint"),
+                    "recommendation_reason": entry.get("reason") or entry.get("recommendationReason") or entry.get("recommendation_reason"),
+                    "body": entry.get("body") or entry.get("description"),
+                    "source_badges": json_dumps(entry.get("sourceBadges") or entry.get("source_badges") or []),
+                }
+            )
+    return rows
+
+
+def _itinerary_from_item_rows(rows):
+    grouped = {}
+    for row in rows or []:
+        day_index = _positive_int(row.get("day_index"), 1)
+        grouped.setdefault(day_index, []).append(row)
+
+    days = []
+    for day_index in sorted(grouped):
+        entries = [_entry_from_item_row(row) for row in sorted(grouped[day_index], key=lambda item: _positive_int(item.get("sort_order"), 1))]
+        days.append({"day": day_index, "items": entries, "stops": list(entries)})
+    return {"days": days}
+
+
+def _entry_from_item_row(row):
+    entry = {
+        "itemId": row.get("id"),
+        "sortOrder": _positive_int(row.get("sort_order"), 1),
+        "title": row.get("place_name"),
+        "body": row.get("body"),
+    }
+    optional_fields = {
+        "time": row.get("time_slot"),
+        "timeSlot": row.get("time_slot"),
+        "contentId": row.get("content_id"),
+        "placeId": row.get("place_id"),
+        "latitude": row.get("latitude"),
+        "longitude": row.get("longitude"),
+        "move": row.get("move_hint"),
+        "moveHint": row.get("move_hint"),
+        "reason": row.get("recommendation_reason"),
+        "recommendationReason": row.get("recommendation_reason"),
+        "sourceBadges": json_loads(row.get("source_badges"), []),
+    }
+    entry.update({key: value for key, value in optional_fields.items() if value not in (None, "", [])})
+    return entry
+
+
+def _day_entries(day):
+    items = day.get("items")
+    stops = day.get("stops")
+    if isinstance(items, list) and items:
+        return items
+    if isinstance(stops, list) and stops:
+        return stops
+    return []
+
+
+def _positive_int(value, default):
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, str) and value.isdigit() and int(value) > 0:
+        return int(value)
+    return default
 
 
 def _itinerary_with_entry_aliases(itinerary):

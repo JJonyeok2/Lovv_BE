@@ -153,6 +153,8 @@ def _public_detail(plan):
     return {
         "itineraryId": plan.get("itineraryId"),
         "sourceRecommendationId": plan.get("sourceRecommendationId"),
+        "userId": plan.get("userId"),
+        "ownerId": plan.get("userId"),
         "title": plan.get("title"),
         "summary": plan.get("summary"),
         "destination": plan.get("destination") or {},
