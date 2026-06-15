@@ -16,7 +16,7 @@ def lambda_handler(event, context):
             "sid": claims.get("sid", ""),
             "sessionId": claims.get("sid", ""),
             "provider": claims.get("provider", ""),
-            "roles": ",".join(claims.get("roles") or ["R-USER"]),
+            "roles": ",".join(claims.get("roles") if "roles" in claims else ["R-USER"]),
             "displayName": claims.get("display_name", ""),
             "iss": claims["iss"],
             "aud": claims["aud"],

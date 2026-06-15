@@ -17,7 +17,7 @@ def authenticated_claims(event):
         "sub": token_claims["sub"],
         "userId": token_claims["sub"],
         "sessionId": token_claims.get("sid", ""),
-        "roles": token_claims.get("roles") or ["R-USER"],
+        "roles": token_claims.get("roles") if "roles" in token_claims else ["R-USER"],
         "provider": token_claims.get("provider", ""),
     }
 

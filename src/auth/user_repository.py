@@ -58,7 +58,7 @@ class RdsDataUserRepository:
     def get_user(self, user_id):
         row = self.rds.fetch_one(
             f"""
-            SELECT id, email, display_name, avatar_url, status
+            SELECT id, email, display_name, avatar_url, status, role
             FROM {self.users_table}
             WHERE id = :user_id AND status = 'active'
             """,
@@ -69,7 +69,7 @@ class RdsDataUserRepository:
     def _find_by_social(self, provider, provider_user_id):
         row = self.rds.fetch_one(
             f"""
-            SELECT u.id, u.email, u.display_name, u.avatar_url, u.status
+            SELECT u.id, u.email, u.display_name, u.avatar_url, u.status, u.role
             FROM {self.social_accounts_table} sa
             JOIN {self.users_table} u ON u.id = sa.user_id
             WHERE sa.provider = :provider
@@ -83,7 +83,7 @@ class RdsDataUserRepository:
     def _find_by_verified_email(self, email):
         row = self.rds.fetch_one(
             f"""
-            SELECT id, email, display_name, avatar_url, status
+            SELECT id, email, display_name, avatar_url, status, role
             FROM {self.users_table}
             WHERE email = :email AND status = 'active'
             """,
@@ -116,6 +116,7 @@ class RdsDataUserRepository:
             "email": identity.email if identity.email_verified else None,
             "displayName": display_name,
             "avatarUrl": identity.avatar_url,
+            "role": "user",
             "roles": ["R-USER"],
             "status": "active",
         }
@@ -206,6 +207,7 @@ class InMemoryUserRepository:
                 "email": identity.email if identity.email_verified else None,
                 "displayName": identity.display_name or "Lovv User",
                 "avatarUrl": identity.avatar_url,
+                "role": "user",
                 "roles": ["R-USER"],
                 "status": "active",
                 "createdAt": now or self.now,
@@ -229,7 +231,18 @@ class InMemoryUserRepository:
         user = self.users.get(user_id)
         if not user or user.get("status") != "active":
             return None
-        return dict(user)
+        result = dict(user)
+        result["roles"] = roles_for_db_role(result.get("role"))
+        return result
+
+
+def roles_for_db_role(role):
+    normalized = (role or "user").strip().lower() if isinstance(role, str) else "user"
+    if normalized == "admin":
+        return ["R-ADMIN"]
+    if normalized == "user":
+        return ["R-USER"]
+    return []
 
 
 def _user_from_row(row):
@@ -238,7 +251,8 @@ def _user_from_row(row):
         "email": row.get("email"),
         "displayName": row.get("display_name") or "Lovv User",
         "avatarUrl": row.get("avatar_url"),
-        "roles": ["R-USER"],
+        "role": row.get("role") or "user",
+        "roles": roles_for_db_role(row.get("role")),
         "status": row.get("status") or "active",
     }
 

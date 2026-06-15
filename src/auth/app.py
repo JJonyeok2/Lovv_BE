@@ -127,7 +127,7 @@ def _handle_social_login(provider, event, provider_verifier, user_repository, se
         session_id=session["sessionId"],
         provider=provider,
         display_name=user_result.user.get("displayName"),
-        roles=user_result.user.get("roles") or ["R-USER"],
+        roles=user_result.user.get("roles") if "roles" in user_result.user else ["R-USER"],
     )
     preference_state = _preference_state(preference_repository, user_result.user["userId"])
 
@@ -174,9 +174,7 @@ def _handle_cognito_session(event, user_repository, session_repository, preferen
     )
     now_iso = _now_iso()
     user_result = user_repository.upsert_from_provider(identity, now_iso)
-    roles = ["R-USER"]
     user = dict(user_result.user)
-    user["roles"] = roles
     user["cognitoSub"] = str(cognito_sub)
     user["emailVerified"] = email_verified
 
@@ -197,7 +195,7 @@ def _handle_cognito_session(event, user_repository, session_repository, preferen
         session_id=session["sessionId"],
         provider="cognito",
         display_name=user.get("displayName"),
-        roles=roles,
+        roles=user.get("roles") if "roles" in user else ["R-USER"],
     )
     preference_state = _preference_state(preference_repository, user["userId"])
 
@@ -266,7 +264,7 @@ def _handle_session(event, user_repository, session_repository, preference_repos
         session_id=session["sessionId"],
         provider=session.get("provider"),
         display_name=user.get("displayName"),
-        roles=user.get("roles") or ["R-USER"],
+        roles=user.get("roles") if "roles" in user else ["R-USER"],
     )
     preference = preference_repository.get_by_user_id(user["userId"]) if preference_repository else None
     onboarding_completed = bool(preference and preference.get("onboardingCompleted"))
@@ -480,7 +478,7 @@ def _public_user(user, is_new_user=None, provider=None):
         "name": display_name,
         "email": user.get("email"),
         "avatarUrl": user.get("avatarUrl"),
-        "roles": user.get("roles") or ["R-USER"],
+        "roles": user.get("roles") if "roles" in user else ["R-USER"],
     }
     if provider:
         result["provider"] = provider

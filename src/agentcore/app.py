@@ -1,7 +1,11 @@
 import base64
 import hashlib
 import json
+import os
+import uuid
 from datetime import datetime, timezone
+
+import boto3
 
 from shared.http import error_response, json_response
 
@@ -41,7 +45,85 @@ def _handle_request(event):
         return error_response(404, "NOT_FOUND", "Route not found")
 
     payload = _validate_payload(_json_body(event))
-    return json_response(200, _mock_recommendation(payload))
+
+    # Support mock query param or environment variable override
+    if payload.get("mock") or os.environ.get("MOCK_RECOMMENDATION") == "true":
+        return json_response(200, _mock_recommendation(payload))
+
+    try:
+        return json_response(200, _invoke_bedrock_agent(payload))
+    except Exception as error:
+        print(f"Bedrock AgentCore invocation failed: {str(error)}. Falling back to mock recommendation.")
+        mock_res = _mock_recommendation(payload)
+        mock_res["fallback"] = True
+        mock_res["error"] = str(error)
+        return json_response(200, mock_res)
+
+
+_bedrock_client = None
+
+
+def _get_bedrock_client():
+    global _bedrock_client
+    if _bedrock_client is None:
+        _bedrock_client = boto3.client("bedrock-agentcore", region_name="us-east-1")
+    return _bedrock_client
+
+
+def _invoke_bedrock_agent(payload):
+    agent_arn = os.environ.get(
+        "BEDROCK_AGENT_ARN",
+        "arn:aws:bedrock-agentcore:us-east-1:925273580929:runtime/myagent_MyAgent-FNVZimELXM",
+    )
+
+    session_id = payload.get("sessionId")
+    if not session_id or len(session_id) < 33:
+        session_id = f"session-{uuid.uuid4().hex}"  # 40 chars
+
+    country = payload.get("country")
+    trip_type = payload.get("tripType")
+    themes = payload.get("themes", [])
+    include_festivals = payload.get("includeFestivals", False)
+    destination_id = payload.get("destinationId", "")
+    query = payload.get("naturalLanguageQuery", "")
+
+    prompt_text = (
+        f"Country: {country}\n"
+        f"Duration: {trip_type}\n"
+        f"Themes: {', '.join(themes)}\n"
+        f"Include Festivals: {'Yes' if include_festivals else 'No'}\n"
+        f"Destination ID: {destination_id or 'None'}\n"
+        f"User Request: {query or 'None'}\n\n"
+        "Generate a structured travel itinerary in JSON format with days, items, "
+        "timeOfDay (morning/afternoon/evening), title, body, reason, and moveMinutes fields."
+    )
+
+    # payload must be bytes
+    bedrock_payload = json.dumps({"prompt": prompt_text}).encode("utf-8")
+
+    client = _get_bedrock_client()
+    response = client.invoke_agent_runtime(
+        agentRuntimeArn=agent_arn,
+        runtimeSessionId=session_id,
+        payload=bedrock_payload,
+    )
+
+    response_body = response["response"].read()
+    response_data = json.loads(response_body)
+
+    itinerary = response_data.get("itinerary") if isinstance(response_data, dict) else None
+    if not itinerary:
+        itinerary = response_data
+
+    res = _mock_recommendation(payload)
+    res["mock"] = False
+    res["sessionId"] = session_id
+    if isinstance(itinerary, dict) and "days" in itinerary:
+        res["itinerary"] = itinerary
+        if "saveCompatibility" in res and "payload" in res["saveCompatibility"]:
+            res["saveCompatibility"]["payload"]["itinerary"] = itinerary
+
+    return res
 
 
 def _validate_payload(body):

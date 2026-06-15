@@ -364,6 +364,58 @@ class AuthAppTest(unittest.TestCase):
             self.assertFalse(body["onboardingCompleted"])
             self.assertIsNone(body["preferences"])
 
+    def test_me_derives_admin_role_from_existing_user_record(self):
+        with patch.dict(os.environ, AUTH_ENV, clear=True):
+            login = self.request(
+                make_event("POST", "/api/v1/auth/google", {"credentialType": "id_token", "credential": "valid-google-token"})
+            )
+            user_id = json.loads(login["body"])["user"]["userId"]
+            self.user_repository.users[user_id]["role"] = "admin"
+
+            response = self.request(
+                make_event(
+                    "GET",
+                    "/api/v1/auth/me",
+                    authorizer_context={"userId": user_id, "sessionId": "session-1", "roles": "R-USER", "provider": "google"},
+                )
+            )
+            body = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 200)
+            self.assertEqual(body["user"]["roles"], ["R-ADMIN"])
+
+    def test_session_cookie_derives_admin_role_from_existing_user_record(self):
+        with patch.dict(os.environ, AUTH_ENV, clear=True):
+            login = self.request(
+                make_event("POST", "/api/v1/auth/google", {"credentialType": "id_token", "credential": "valid-google-token"})
+            )
+            user_id = json.loads(login["body"])["user"]["userId"]
+            cookie = login["headers"]["Set-Cookie"].split(";", 1)[0]
+            self.user_repository.users[user_id]["role"] = "admin"
+
+            response = self.request(make_event("GET", "/api/v1/auth/session", cookies=[cookie]))
+            body = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 200)
+            self.assertEqual(body["user"]["roles"], ["R-ADMIN"])
+            self.assertEqual(verify_access_token(body["accessToken"])["roles"], ["R-ADMIN"])
+
+    def test_session_cookie_fails_closed_for_system_role(self):
+        with patch.dict(os.environ, AUTH_ENV, clear=True):
+            login = self.request(
+                make_event("POST", "/api/v1/auth/google", {"credentialType": "id_token", "credential": "valid-google-token"})
+            )
+            user_id = json.loads(login["body"])["user"]["userId"]
+            cookie = login["headers"]["Set-Cookie"].split(";", 1)[0]
+            self.user_repository.users[user_id]["role"] = "system"
+
+            response = self.request(make_event("GET", "/api/v1/auth/session", cookies=[cookie]))
+            body = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 200)
+            self.assertEqual(body["user"]["roles"], [])
+            self.assertEqual(verify_access_token(body["accessToken"])["roles"], [])
+
     def test_me_returns_saved_preferences_with_selected_theme_ids_alias(self):
         with patch.dict(os.environ, AUTH_ENV, clear=True):
             login = self.request(

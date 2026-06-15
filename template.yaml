@@ -512,6 +512,15 @@ Resources:
     Properties:
       Handler: agentcore.app.lambda_handler
       Description: Mock recommendation API for frontend integration. Bedrock AgentCore integration is deferred.
+      Environment:
+        Variables:
+          BEDROCK_AGENT_ARN: "arn:aws:bedrock-agentcore:us-east-1:925273580929:runtime/myagent_MyAgent-FNVZimELXM"
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - "bedrock-agentcore:InvokeAgentRuntime"
+              Resource: "arn:aws:bedrock-agentcore:us-east-1:925273580929:runtime/myagent_MyAgent-FNVZimELXM"
       Events:
         CreateRecommendation:
           Type: HttpApi

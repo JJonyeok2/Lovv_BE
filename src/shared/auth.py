@@ -46,7 +46,7 @@ def create_access_token(
     ttl = int(ttl_seconds if ttl_seconds is not None else _token_ttl_seconds())
     claims = {
         "sub": user_id,
-        "roles": roles or list(DEFAULT_ROLES),
+        "roles": list(DEFAULT_ROLES) if roles is None else list(roles),
         "iat": issued_at,
         "exp": issued_at + ttl,
         "iss": _issuer(),

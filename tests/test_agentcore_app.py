@@ -1,7 +1,11 @@
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
+
+# Ensure mock mode is used during unit tests
+os.environ["MOCK_RECOMMENDATION"] = "true"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
