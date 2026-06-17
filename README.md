@@ -1,120 +1,130 @@
-# Lovv_BE
+# Lovv Backend (BE)
 
-Lovv용 AWS SAM 백엔드입니다.
+Lovv 서비스의 AWS SAM(Serverless Application Model) 기반 서버리스 백엔드 애플리케이션입니다. Amazon API Gateway, AWS Lambda, Amazon Aurora MySQL, Amazon DynamoDB, Amazon S3를 연동하여 안전하고 확장 가능한 백엔드 API를 제공합니다.
 
-## 현재 범위
+---
 
-현재 구현된 백엔드 도메인은 다음과 같습니다.
+## 🛠 Tech Stack & Architecture
 
-- Auth 소셜 로그인 / Cognito bridge: `POST /api/v1/auth/google`, `POST /api/v1/auth/kakao`, `POST /api/v1/auth/cognito/session`, `GET /api/v1/auth/me`, `GET /api/v1/auth/session`, `POST /api/v1/auth/logout`
-- 사용자 선호도: `GET /api/v1/me/preferences`, `PUT /api/v1/me/preferences`
-- 지도 / 도시: 기존 `GET /api/small-cities`, `GET /api/small-cities/{cityId}`, `GET /api/small-cities/{cityId}/places`와 `/api/v1` alias, marker projection
-- AgentCore mock: `POST /api/v1/recommendations`
-- 저장 일정: `POST /api/v1/me/itineraries`, `GET /api/v1/me/itineraries`, `GET /api/v1/me/itineraries/{itineraryId}`, `DELETE /api/v1/me/itineraries/{itineraryId}`, like/unlike routes
+- **Framework**: AWS SAM (Serverless Application Model)
+- **Runtime**: Python 3.9
+- **API Gateway**: Amazon API Gateway (REST API & Cognito JWT Authorizer)
+- **Database**:
+  - **Amazon Aurora MySQL**: VPC 내부의 관계형 데이터베이스로, 사용자 정보(`users`), 소셜 계정 연동(`social_accounts`), 취향 선호도(`user_preferences`), 저장한 일정(`itineraries`, `itinerary_items`, `plan_reactions`) 데이터를 보관합니다.
+  - **Amazon DynamoDB**: TTL(Time-To-Live) 기반의 세션 관리용 저장소(`auth_sessions`)로 사용됩니다.
+- **Object Storage**:
+  - **Amazon S3**: 한국/일본 소도시 상세 정보(명소, 축제, 통계 등)를 포함하는 원천 JSON 데이터를 적재 및 조회하는 용도로 사용됩니다.
 
-이번 구현 범위에서 제외된 항목은 다음과 같습니다.
+---
 
-- Bedrock AgentCore 실연동
-- LLM 호출
-- 추천 품질 / 랭킹 개선
-- 대화 이력 영속화
-- 진행 중인 draft 영속화
+## 🌐 API Endpoints
 
-## 저장소
+### 1. 인증 및 세션 (Auth)
+- **`POST /api/v1/auth/google`**: Google ID Token 또는 Authorization Code 검증 및 로그인 처리.
+- **`POST /api/v1/auth/kakao`**: Kakao ID Token 또는 Authorization Code 검증 및 로그인 처리.
+- **`POST /api/v1/auth/cognito/session`**: Cognito JWT Authorizer가 검증한 클레임을 Lovv 세션으로 연동(Bridge).
+- **`GET /api/v1/auth/session`**: HttpOnly Secure 쿠키(`lovv_session`)에 담긴 refresh token 기반 세션 연환 및 복원.
+- **`GET /api/v1/auth/me`**: 현재 로그인된 사용자의 상세 프로필 조회.
+- **`POST /api/v1/auth/logout`**: 활성 세션을 파기하고 브라우저 쿠키를 만료 처리.
 
-- `users`, `social_accounts`, `user_preferences`, 저장 일정 관련 테이블: 기존 Lovv Data Stack의 RDS MySQL에 VPC 내부 직접 MySQL 연결로 접근합니다.
-- `auth_sessions`: 기존 Lovv Data Stack의 DynamoDB 테이블을 사용하며 `expiresAt` 기준 TTL을 적용합니다.
-- 지도 / 도시 원천 데이터: `raw/KR/details/20260609/` 아래의 S3 raw city detail JSON을 사용합니다.
-- attractions, festivals, visitor statistics는 이번 범위에서 Aurora에 적재하지 않습니다.
+### 2. 사용자 취향 선호도 (Preferences)
+- **`GET /api/v1/me/preferences`**: 현재 사용자의 맞춤 여행 선호도 프로필 조회.
+- **`PUT /api/v1/me/preferences`**: 취향 온보딩 결과 또는 마이페이지에서의 선호도 업데이트.
 
-기존 Data Stack RDS DDL:
+### 3. 소도시 및 지도 데이터 (Map/Cities)
+- **`GET /api/small-cities`**: 소도시 목록 마커 정보 조회 (CORS 및 위도/경도 데이터 포함).
+- **`GET /api/small-cities/{cityId}`**: 특정 소도시의 상세 메타데이터 조회.
+- **`GET /api/small-cities/{cityId}/places`**: 소도시 내 명소(`attractions`) 및 축제(`festivals`) 정보 조회 (S3 연동).
+
+### 4. AI 일정 추천 (AgentCore Mock)
+- **`POST /api/v1/recommendations`**: 여행 테마, 일정 기간, 축제 포함 여부를 기반으로 한 AI 일정 매핑 (MVP 범위 내 Mock 처리).
+
+### 5. 일정 저장 및 반응 (Saved Plans)
+- **`POST /api/v1/me/itineraries`**: 생성된 여행 일정을 보관함에 영속 저장.
+- **`GET /api/v1/me/itineraries`**: 저장된 일정 목록 조회.
+- **`GET /api/v1/me/itineraries/{itineraryId}`**: 저장된 일정의 일차별 상세 명세 조회.
+- **`DELETE /api/v1/me/itineraries/{itineraryId}`**: 저장된 일정의 soft delete (`deleted_at` 처리).
+- **`POST /api/v1/me/itineraries/{itineraryId}/like`**: 저장된 일정에 좋아요 누르기.
+- **`DELETE /api/v1/me/itineraries/{itineraryId}/like`**: 저장된 일정의 좋아요 취소.
+
+---
+
+## 🔒 Authentication Model
+
+- **Access Token**: HMAC-SHA256(`AUTH_TOKEN_SIGNING_SECRET`)으로 서명한 짧은 수명의 JWT를 Bearer 헤더로 전달받아 API 인증에 사용합니다.
+- **Refresh Token**: 브라우저와 연동되는 `HttpOnly; Secure; SameSite=None` 속성의 opaque 쿠키를 활용하여 무상태(Stateless) JWT의 한계를 보완하고 세션을 유지합니다.
+- **Session DB**: DynamoDB에는 노출을 최소화하기 위해 해시된 refresh token 값만 저장하며, 세션 만료 시 TTL에 의해 자동 청소됩니다.
+- **Cognito Bridge**: Hosted UI를 거친 사용자는 API Gateway의 Cognito JWT Authorizer 검증을 마친 뒤 `/auth/cognito/session`으로 연결(Bridge)되어 `R-USER` 권한을 할당받습니다.
+
+---
+
+## 📂 Backend Directory Structure
 
 ```text
-infra/data-stack/rds/schema.sql
+Lovv_BE/
+├── .aws-sam/             # AWS SAM 빌드 임시 결과물
+├── docs/                 # 백엔드 설계 및 API 스펙 문서
+├── events/               # Lambda 로컬 실행 테스트용 API Gateway mock events
+├── infra/                # 인프라 SQL 및 데이터 스택 정의
+│   └── data-stack/rds/schema.sql
+├── parameters/           # 배포 매개변수 설정 템플릿
+├── src/
+│   ├── auth/             # 로그인, 세션 처리, 토큰 관리 Lambda 핸들러
+│   ├── map_city/         # 소도시 정보 및 S3 JSON 파싱 Lambda 핸들러
+│   ├── preferences/      # 선호도 CRUD Lambda 핸들러
+│   ├── recommendations/  # AI 일정 생성 처리 Lambda 핸들러
+│   ├── saved_plans/      # 일정 보관함 및 반응 CRUD Lambda 핸들러
+│   └── shared/           # DB 커넥션, CORS, Response 등 공유 헬퍼
+├── template.yaml         # CloudFormation 기반 AWS 리소스 정의 템플릿
+└── tests/                # unittest 프레임워크 기반 API/핸들러 테스트 케이스
 ```
 
-저장 일정 API는 Data Stack RDS의 `itineraries`, `itinerary_items`, `plan_reactions` 테이블 shape에 맞춰 동작합니다. 일정 삭제는 `deleted_at` 기반 soft delete이며, 삭제된 일정은 목록/상세/반응 흐름에서 제외됩니다.
+---
 
-## 인증 모델
+## 🚀 Local Verification & Testing
 
-- 서비스 user 조회 / 생성 전에 provider credential을 서버에서 검증합니다.
-- access token은 `AUTH_TOKEN_SIGNING_SECRET`으로 서명한 짧은 수명의 JWT입니다.
-- refresh / session 유지는 HttpOnly Secure cookie 안의 opaque token을 사용합니다.
-- DynamoDB에는 refresh token hash만 저장합니다.
-- logout은 refresh session을 revoke합니다. 이미 발급된 access JWT는 이후 active-session authorizer 검사가 추가되지 않는 한 stateless하게 `exp`까지 유효합니다.
-- logout 요청에 유효한 refresh cookie가 없더라도 유효한 bearer access JWT가 있으면 JWT의 `sid` session revoke를 시도합니다.
-- Google / Kakao production login은 OIDC `id_token`과 OAuth `authorization_code`를 모두 허용합니다.
-- `authorization_code` login에는 `redirectUri`가 필요합니다. Google code exchange에는 `GOOGLE_CLIENT_SECRET`도 필요하며, Kakao는 앱 설정에서 client secret을 요구할 때만 `KAKAO_CLIENT_SECRET`을 사용합니다.
-- code exchange 결과는 OIDC `id_token`을 포함해야 합니다. 백엔드는 provider ID token을 다시 검증한 뒤 Lovv session을 생성합니다.
-- `POST /api/v1/auth/cognito/session`은 API Gateway Cognito JWT authorizer가 전달한 `requestContext.authorizer.jwt.claims`를 Lovv user/session 응답으로 bridge합니다. 초기 Cognito bridge 단계에서는 role을 `R-USER`로 고정하며, Cognito group 기반 Admin/Operator/Data Provider 권한 매핑은 별도 Admin/권한 Task 범위에서 확장합니다. Cognito User Pool, Hosted UI, Google/Kakao IdP, API Gateway JWT Authorizer 리소스 생성은 별도 PoC/배포 Task 범위입니다.
-- `EnableCognitoPoC=true` 배포 파라미터를 사용할 때만 Cognito User Pool, Hosted UI domain, Google IdP, Kakao OIDC IdP, Cognito app client 리소스를 생성합니다. 기본값은 `false`라 기존 배포에 Cognito 리소스를 강제 생성하지 않습니다.
-- 기존 demo용 `POST /api/auth/login` route는 production auth로 mount하지 않습니다.
-
-## 지도 / 도시 데이터 소스
-
-예상 S3 source:
-
-```text
-s3://lovv-data-pipeline-dev-925273580929/raw/KR/details/20260609/{CityNameEn}.json
-```
-
-각 city file은 city record와 raw `attraction`, `festival`, `visitor_statistics` records를 포함합니다. Lambda는 이 JSON 파일을 직접 읽고, city record와 summary fields를 기반으로 city list/detail response를 매핑하며, attractions/festivals는 `/places`를 통해 노출합니다.
-
-이번 구현에서 Aurora는 상세 관광 콘텐츠의 source of truth가 아닙니다. Aurora는 users, social accounts, preferences, saved plans처럼 사용자가 소유한 영속 데이터에 우선 사용합니다.
-
-Lambda는 `image_url`을 반환하기 전에 HTTP(S) URL인지 검증하며, 지도 / 도시 데이터 조회를 위해 Kakao 또는 다른 live provider API를 호출하지 않습니다.
-
-## 로컬 검증
+배포하기 전 로컬 환경에서 백엔드 함수와 API 흐름을 검증할 수 있습니다.
 
 ```bash
+# 1. unittest 기반 백엔드 단위 테스트 수행
 python3 -m unittest discover -s tests
+
+# 2. 로컬 API 스모크 테스트 (외부 API Mocking을 통한 핸들러 동작 점검)
 python3 scripts/local_api_smoke.py
+
+# 3. AWS SAM 템플릿 검증 및 린팅
 sam validate
 sam validate --lint
-git diff --check
+
+# 4. SAM 빌드 실행 (Lambda 모듈 패키징)
 sam build
 ```
 
-`scripts/local_api_smoke.py`는 외부 provider나 실제 secret을 사용하지 않고 handler 레벨에서 로그인, preferences 저장/조회, small-cities list/detail/places, saved plans 저장/list/detail/delete, like/unlike 흐름을 1회 검증합니다.
+---
 
-## 배포 파라미터
+## ☁️ Deployment
 
-실제 값은 deploy parameter 또는 환경 설정으로 주입합니다. 실제 secret은 커밋하지 않습니다.
+`sam deploy` 명령을 사용해 AWS에 리소스를 배포합니다. 실제 Secret Key 등은 파라미터 재정의(`--parameter-overrides`) 옵션을 통해 주입합니다.
 
 ```bash
 sam deploy --guided \
   --parameter-overrides \
-  MapCityS3Bucket=lovv-data-pipeline-dev-925273580929 \
+  MapCityS3Bucket=your-data-pipeline-bucket \
   MapCityS3Prefix=raw/KR/details/20260609/ \
-  AllowedCorsOrigin=http://localhost:5173,http://127.0.0.1:5173,https://d3nuef0zacpyj.cloudfront.net \
-  AuthTokenSigningSecret=replace-with-secret-manager-or-ci-value \
+  AllowedCorsOrigin=http://localhost:5173,https://your-cloudfront-domain.net \
+  AuthTokenSigningSecret=your-token-signing-secret \
   AuthRefreshCookieSameSite=None \
   AuthRefreshCookieSecure=true \
-  AuthRefreshCookieDomain=.your-service-domain.example \
   AuthRefreshCookiePath=/ \
-  GoogleClientId=replace-with-google-web-client-id \
-  GoogleClientSecret=replace-with-google-web-client-secret \
-  KakaoClientId=replace-with-kakao-oidc-client-id \
-  KakaoClientSecret=replace-with-kakao-client-secret-if-enabled \
+  GoogleClientId=your-google-client-id \
+  GoogleClientSecret=your-google-client-secret \
+  KakaoClientId=your-kakao-client-id \
   EnableCognitoPoC=true \
-  CognitoJwtIssuer=https://replace-with-cognito-issuer.example \
-  CognitoJwtAudience=replace-with-cognito-app-client-id \
-  CognitoUserPoolName=lovv-auth-users \
-  CognitoUserPoolClientName=lovv-web \
-  CognitoHostedUiDomainPrefix=replace-with-globally-unique-prefix \
-  CognitoCallbackUrls=http://localhost:5173/auth/callback/cognito,http://127.0.0.1:5173/auth/callback/cognito,https://d3nuef0zacpyj.cloudfront.net/auth/callback/cognito \
-  CognitoLogoutUrls=http://localhost:5173/,http://127.0.0.1:5173/,https://d3nuef0zacpyj.cloudfront.net/ \
-  CognitoGoogleClientId=replace-with-google-oauth-client-id \
-  CognitoGoogleClientSecret=replace-with-google-oauth-client-secret \
-  CognitoKakaoClientId=replace-with-kakao-oidc-client-id \
-  CognitoKakaoClientSecret=replace-with-kakao-oidc-client-secret \
-  RdsHost=replace-with-existing-lovv-data-stack-rds-host \
-  RdsSecretArn=replace-with-existing-lovv-data-stack-secret-arn \
+  RdsHost=your-rds-aurora-endpoint \
+  RdsSecretArn=your-rds-credentials-secret-arn \
   RdsDatabaseName=lovvdev \
-  VpcId=replace-with-existing-lovv-data-stack-vpc-id \
-  PrivateSubnetA=replace-with-existing-lovv-data-stack-private-subnet-a \
-  PrivateSubnetC=replace-with-existing-lovv-data-stack-private-subnet-c \
+  VpcId=your-vpc-id \
+  PrivateSubnetA=your-private-subnet-a \
+  PrivateSubnetC=your-private-subnet-c \
   AuthSessionsTableName=lovv_dev_auth_sessions
 ```
-
-Auth Lambda가 private Data Stack VPC 안에서 실행되는 경우, live Google/Kakao token verification과 authorization-code exchange에는 NAT 또는 승인된 다른 egress 설계 같은 outbound internet egress 경로가 필요합니다.
