@@ -35,10 +35,21 @@ Parameters:
       - "true"
       - "false"
     Description: Keep true for production-like environments.
+  EnableNatInstance:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable the optional dev NAT instance for private subnet internet egress.
   VpcCidr:
     Type: String
     Default: 10.40.0.0/16
     Description: Development VPC CIDR for the data stack.
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.40.1.0/24
+    Description: Development public subnet CIDR for the optional NAT instance.
   PrivateSubnetACidr:
     Type: String
     Default: 10.40.10.0/24
@@ -51,10 +62,19 @@ Parameters:
     Type: String
     Default: 10.40.0.0/16
     Description: CIDR allowed to connect to MySQL in development.
+  NatInstanceType:
+    Type: String
+    Default: t4g.nano
+    Description: EC2 instance type for the optional dev NAT instance.
+  NatInstanceAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+    Description: Amazon Linux 2023 ARM64 AMI for the optional dev NAT instance.
 
 # 조건: RDS 삭제 보호는 파라미터로 켜고 끌 수 있지만, 기본값은 보호 활성화이다.
 Conditions:
   EnableRDSDeletionProtection: !Equals [!Ref RDSDeletionProtection, "true"]
+  CreateNatInstance: !Equals [!Ref EnableNatInstance, "true"]
 
 Resources:
   # 개발용 VPC: SAM 앱 스택과 분리된 stateful Data Stack 네트워크 경계이다.
@@ -110,7 +130,75 @@ Resources:
         - Key: Tier
           Value: private
 
-  # private subnet용 route table이다. NAT Gateway는 두지 않고 AWS 서비스 접근은 VPC Endpoint로 처리한다.
+  # NAT 인스턴스용 public subnet이다. 비용과 public egress를 피하기 위해 기본값에서는 생성하지 않는다.
+  LovvPublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Condition: CreateNatInstance
+    Properties:
+      VpcId: !Ref LovvDevVPC
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub lovv-${EnvName}-public-a
+        - Key: Project
+          Value: Lovv
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Tier
+          Value: public
+
+  # NAT 인스턴스 public subnet의 인터넷 출구이다.
+  LovvInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Condition: CreateNatInstance
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub lovv-${EnvName}-igw
+        - Key: Project
+          Value: Lovv
+        - Key: Environment
+          Value: !Ref EnvName
+
+  LovvInternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Condition: CreateNatInstance
+    Properties:
+      VpcId: !Ref LovvDevVPC
+      InternetGatewayId: !Ref LovvInternetGateway
+
+  LovvPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: CreateNatInstance
+    Properties:
+      VpcId: !Ref LovvDevVPC
+      Tags:
+        - Key: Name
+          Value: !Sub lovv-${EnvName}-public-rt
+        - Key: Project
+          Value: Lovv
+        - Key: Environment
+          Value: !Ref EnvName
+
+  LovvPublicDefaultRoute:
+    Type: AWS::EC2::Route
+    Condition: CreateNatInstance
+    DependsOn: LovvInternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref LovvPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref LovvInternetGateway
+
+  LovvPublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateNatInstance
+    Properties:
+      SubnetId: !Ref LovvPublicSubnetA
+      RouteTableId: !Ref LovvPublicRouteTable
+
+  # private subnet용 route table이다. AWS 서비스 접근은 VPC Endpoint로 처리하고, public egress는 선택 NAT 인스턴스로만 연다.
   LovvPrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -183,6 +271,67 @@ Resources:
         - Key: Environment
           Value: !Ref EnvName
 
+  # 선택 NAT 인스턴스 보안 그룹이다. public SSH는 열지 않고 VPC 내부 트래픽만 NAT 대상으로 받는다.
+  LovvNatInstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: CreateNatInstance
+    Properties:
+      GroupDescription: !Sub Lovv ${EnvName} optional NAT instance access
+      VpcId: !Ref LovvDevVPC
+      SecurityGroupIngress:
+        - IpProtocol: -1
+          CidrIp: !Ref VpcCidr
+          Description: Development VPC traffic to NAT instance
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub lovv-${EnvName}-nat-instance-sg
+        - Key: Project
+          Value: Lovv
+        - Key: Environment
+          Value: !Ref EnvName
+
+  # NAT 인스턴스 운영 접근은 SSM Session Manager만 사용한다.
+  LovvNatInstanceRole:
+    Type: AWS::IAM::Role
+    Condition: CreateNatInstance
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Tags:
+        - Key: Project
+          Value: Lovv
+        - Key: Environment
+          Value: !Ref EnvName
+
+  LovvNatInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: CreateNatInstance
+    Properties:
+      Roles:
+        - !Ref LovvNatInstanceRole
+
+  # SSM port forwarding으로 NAT 인스턴스를 경유해 private RDS에 접속할 때만 MySQL을 허용한다.
+  LovvRDSIngressFromNatInstance:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: CreateNatInstance
+    Properties:
+      GroupId: !Ref LovvRDSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: !Ref LovvNatInstanceSecurityGroup
+      Description: MySQL access from optional NAT instance for SSM port forwarding
+
   # Secrets Manager VPC Endpoint: VPC 내부 Lambda가 RDS secret 값을 private 경로로 조회한다.
   SecretsManagerVpcEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -230,6 +379,51 @@ Resources:
       VpcEndpointType: Gateway
       RouteTableIds:
         - !Ref LovvPrivateRouteTable
+
+  # 선택 NAT 인스턴스: dev에서 private subnet의 public HTTPS egress가 필요할 때만 생성한다.
+  LovvNatInstance:
+    Type: AWS::EC2::Instance
+    Condition: CreateNatInstance
+    Properties:
+      ImageId: !Ref NatInstanceAmiId
+      InstanceType: !Ref NatInstanceType
+      IamInstanceProfile: !Ref LovvNatInstanceProfile
+      SubnetId: !Ref LovvPublicSubnetA
+      SecurityGroupIds:
+        - !Ref LovvNatInstanceSecurityGroup
+      SourceDestCheck: false
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          sysctl -w net.ipv4.ip_forward=1
+          grep -q '^net.ipv4.ip_forward = 1' /etc/sysctl.conf || echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.conf
+          dnf install -y iptables-services
+          iptables -t nat -C POSTROUTING -o ens5 -j MASQUERADE || iptables -t nat -A POSTROUTING -o ens5 -j MASQUERADE
+          service iptables save
+          systemctl enable iptables
+          systemctl restart iptables
+      Tags:
+        - Key: Name
+          Value: !Sub lovv-${EnvName}-nat-instance
+        - Key: Project
+          Value: Lovv
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: StackBoundary
+          Value: DataStack
+
+  LovvPrivateDefaultRouteToNatInstance:
+    Type: AWS::EC2::Route
+    Condition: CreateNatInstance
+    DependsOn: LovvNatInstance
+    Properties:
+      RouteTableId: !Ref LovvPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      InstanceId: !Ref LovvNatInstance
 
   # RDS DB subnet group: RDS가 public subnet이 아닌 private subnet에 생성되도록 강제한다.
   LovvDBSubnetGroup:
@@ -699,6 +893,15 @@ Resources:
       Type: String
       Value: !Ref LovvPrivateSubnetC
 
+  # 선택 NAT 인스턴스 운영을 위한 public subnet 공개값이다.
+  PublicSubnetAParameter:
+    Type: AWS::SSM::Parameter
+    Condition: CreateNatInstance
+    Properties:
+      Name: !Sub /lovv/${EnvName}/network/public_subnet_a
+      Type: String
+      Value: !Ref LovvPublicSubnetA
+
   # RDS 접근 경로 확인과 보안 그룹 연동을 위한 RDS security group 공개값이다.
   RDSSecurityGroupParameter:
     Type: AWS::SSM::Parameter
@@ -714,6 +917,22 @@ Resources:
       Name: !Sub /lovv/${EnvName}/network/endpoint_security_group
       Type: String
       Value: !Ref LovvEndpointSecurityGroup
+
+  NatInstanceIdParameter:
+    Type: AWS::SSM::Parameter
+    Condition: CreateNatInstance
+    Properties:
+      Name: !Sub /lovv/${EnvName}/network/nat_instance_id
+      Type: String
+      Value: !Ref LovvNatInstance
+
+  NatInstanceSecurityGroupParameter:
+    Type: AWS::SSM::Parameter
+    Condition: CreateNatInstance
+    Properties:
+      Name: !Sub /lovv/${EnvName}/network/nat_instance_security_group
+      Type: String
+      Value: !Ref LovvNatInstanceSecurityGroup
 
   # SAM 앱이 사용할 DB 이름 공개값이다.
   RDSDatabaseNameParameter:
@@ -820,12 +1039,24 @@ Outputs:
   PrivateSubnetC:
     Description: Development private subnet C ID.
     Value: !Ref LovvPrivateSubnetC
+  PublicSubnetA:
+    Condition: CreateNatInstance
+    Description: Development public subnet A ID for the optional NAT instance.
+    Value: !Ref LovvPublicSubnetA
   RDSSecurityGroup:
     Description: Development RDS security group ID.
     Value: !Ref LovvRDSSecurityGroup
   EndpointSecurityGroup:
     Description: Development interface endpoint security group ID.
     Value: !Ref LovvEndpointSecurityGroup
+  NatInstanceId:
+    Condition: CreateNatInstance
+    Description: Optional development NAT instance ID.
+    Value: !Ref LovvNatInstance
+  NatInstanceSecurityGroup:
+    Condition: CreateNatInstance
+    Description: Optional development NAT instance security group ID.
+    Value: !Ref LovvNatInstanceSecurityGroup
   RDSHost:
     Description: RDS endpoint host.
     Value: !GetAtt LovvRDSInstance.Endpoint.Address

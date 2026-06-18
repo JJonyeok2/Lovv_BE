@@ -40,6 +40,55 @@ The template now creates the development VPC, two private subnets, and RDS secur
 The template also creates VPC Endpoints for Secrets Manager, SSM, DynamoDB, and S3 so SAM Lambda functions in the private subnets can reach required AWS services without a NAT Gateway.
 The template creates a read-only CloudFront distribution for the image bucket. Frontend code must use the CloudFront base URL from `/lovv/dev/cloudfront/image_base_url`, not the direct S3 bucket URL.
 
+## Optional NAT instance
+
+The Data Stack can create a dev-only NAT instance when private-subnet workloads need outbound public internet access beyond the AWS services already covered by VPC Endpoints.
+
+Default behavior:
+
+- `EnableNatInstance=false`
+- No public subnet, Internet Gateway, NAT EC2 instance, or private default route is created.
+- S3, DynamoDB, SSM, and Secrets Manager access continues to use VPC Endpoints.
+
+Validate the template before deployment:
+
+```powershell
+$env:AWS_CLI_FILE_ENCODING='UTF-8'; aws cloudformation validate-template --template-body file://infra/data-stack/template.yaml
+```
+
+Enable only for a development stack that needs public egress. Before enabling, set `EnableNatInstance` to `true` in the deployment parameter overrides. This starts an EC2 instance and may create public internet data-transfer cost. Deployments that create the NAT instance IAM role require `CAPABILITY_IAM`.
+
+Operational notes:
+
+- The NAT instance is single-AZ and intended for dev only.
+- SSH ingress is not opened. Use AWS Systems Manager Session Manager if shell access is required.
+- The NAT instance role grants SSM management only and should not receive RDS, DynamoDB, S3 data-plane, or Secrets Manager data permissions.
+- When NAT is enabled, the RDS security group allows MySQL only from the NAT instance security group. RDS remains private and `PubliclyAccessible=false`.
+- Production public egress needs a separate HA design review, likely NAT Gateway or multi-AZ NAT routing.
+
+### RDS access through SSM port forwarding
+
+Use the NAT instance as an SSM-managed access host, not as a public MySQL endpoint.
+
+1. Read the deployed values:
+
+```powershell
+$natInstanceId = aws ssm get-parameter --name /lovv/dev/network/nat_instance_id --query Parameter.Value --output text
+$rdsHost = aws ssm get-parameter --name /lovv/dev/rds/host --query Parameter.Value --output text
+```
+
+2. Start local port forwarding through the NAT instance to private RDS:
+
+```powershell
+aws ssm start-session --target $natInstanceId --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters "host=$rdsHost,portNumber=3306,localPortNumber=3306"
+```
+
+3. Connect from a local MySQL client while the session is open:
+
+```powershell
+mysql -h 127.0.0.1 -P 3306 -u lovvadmin -p
+```
+
 ## Report
 
 Detailed deployment, validation, and operation notes have been moved to:
