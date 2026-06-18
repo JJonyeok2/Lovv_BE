@@ -130,7 +130,75 @@ Resources:
         - Key: Tier
           Value: private
 
-  # private subnet용 route table이다. NAT Gateway는 두지 않고 AWS 서비스 접근은 VPC Endpoint로 처리한다.
+  # NAT 인스턴스용 public subnet이다. 비용과 public egress를 피하기 위해 기본값에서는 생성하지 않는다.
+  LovvPublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Condition: CreateNatInstance
+    Properties:
+      VpcId: !Ref LovvDevVPC
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub lovv-${EnvName}-public-a
+        - Key: Project
+          Value: Lovv
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Tier
+          Value: public
+
+  # NAT 인스턴스 public subnet의 인터넷 출구이다.
+  LovvInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Condition: CreateNatInstance
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub lovv-${EnvName}-igw
+        - Key: Project
+          Value: Lovv
+        - Key: Environment
+          Value: !Ref EnvName
+
+  LovvInternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Condition: CreateNatInstance
+    Properties:
+      VpcId: !Ref LovvDevVPC
+      InternetGatewayId: !Ref LovvInternetGateway
+
+  LovvPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: CreateNatInstance
+    Properties:
+      VpcId: !Ref LovvDevVPC
+      Tags:
+        - Key: Name
+          Value: !Sub lovv-${EnvName}-public-rt
+        - Key: Project
+          Value: Lovv
+        - Key: Environment
+          Value: !Ref EnvName
+
+  LovvPublicDefaultRoute:
+    Type: AWS::EC2::Route
+    Condition: CreateNatInstance
+    DependsOn: LovvInternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref LovvPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref LovvInternetGateway
+
+  LovvPublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateNatInstance
+    Properties:
+      SubnetId: !Ref LovvPublicSubnetA
+      RouteTableId: !Ref LovvPublicRouteTable
+
+  # private subnet용 route table이다. AWS 서비스 접근은 VPC Endpoint로 처리하고, public egress는 선택 NAT 인스턴스로만 연다.
   LovvPrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
