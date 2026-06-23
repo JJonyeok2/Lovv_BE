@@ -188,6 +188,14 @@ Parameters:
     Type: String
     Default: plan_reactions
     Description: MySQL plan reactions table name.
+  AdminDataProposalsTableName:
+    Type: String
+    Default: admin_data_proposals
+    Description: MySQL admin data proposals table name.
+  AdminDataProposalHistoryTableName:
+    Type: String
+    Default: admin_data_proposal_history
+    Description: MySQL admin data proposal history table name.
 
 Globals:
   Function:
@@ -501,6 +509,77 @@ Resources:
       FunctionName: !Ref AuthAuthorizerFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${LovvHttpApi}/authorizers/*
+
+  AdminFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: admin.app.lambda_handler
+      Description: Admin console API for users and public data proposal registration/review foundation.
+      Environment:
+        Variables:
+          DB_ACCESS_MODE: mysql
+          RDS_HOST: !Ref RdsHost
+          RDS_SECRET_ARN: !Ref RdsSecretArn
+          RDS_DATABASE_NAME: !Ref RdsDatabaseName
+          USERS_TABLE_NAME: !Ref UsersTableName
+          SOCIAL_ACCOUNTS_TABLE_NAME: !Ref SocialAccountsTableName
+          PREFERENCES_TABLE_NAME: !Ref PreferencesTableName
+          SAVED_PLANS_TABLE_NAME: !Ref SavedPlansTableName
+          ADMIN_DATA_PROPOSALS_TABLE_NAME: !Ref AdminDataProposalsTableName
+          ADMIN_DATA_PROPOSAL_HISTORY_TABLE_NAME: !Ref AdminDataProposalHistoryTableName
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref AppFunctionSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnetA
+      Policies:
+        - AWSLambdaVPCAccessExecutionRole
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref RdsSecretArn
+      Events:
+        AdminListUsers:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: GET
+            Path: /api/v1/admin/users
+            Auth:
+              Authorizer: LovvTokenAuthorizer
+        AdminGetUser:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: GET
+            Path: /api/v1/admin/users/{userId}
+            Auth:
+              Authorizer: LovvTokenAuthorizer
+        AdminCreateDataProposal:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: POST
+            Path: /api/v1/admin/data-proposals
+            Auth:
+              Authorizer: LovvTokenAuthorizer
+        AdminListDataProposals:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: GET
+            Path: /api/v1/admin/data-proposals
+            Auth:
+              Authorizer: LovvTokenAuthorizer
+        AdminGetDataProposal:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: GET
+            Path: /api/v1/admin/data-proposals/{proposalId}
+            Auth:
+              Authorizer: LovvTokenAuthorizer
 
   PreferenceFunction:
     Type: AWS::Serverless::Function

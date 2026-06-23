@@ -65,6 +65,32 @@ class ExistingDataStackTemplateTest(unittest.TestCase):
             path_index = preferences_block.index(path)
             self.assertIn("Authorizer: LovvTokenAuthorizer", preferences_block[path_index : path_index + 220])
 
+    def test_admin_routes_use_lovv_token_authorizer(self):
+        admin_index = self.template.index("AdminFunction:")
+        admin_block = self.template[admin_index : self.template.index("PreferenceFunction:")]
+        self.assertEqual(admin_block.count("Authorizer: LovvTokenAuthorizer"), 5)
+        for path in (
+            "Path: /api/v1/admin/users",
+            "Path: /api/v1/admin/users/{userId}",
+            "Path: /api/v1/admin/data-proposals",
+            "Path: /api/v1/admin/data-proposals/{proposalId}",
+        ):
+            path_index = admin_block.index(path)
+            self.assertIn("Authorizer: LovvTokenAuthorizer", admin_block[path_index : path_index + 220])
+
+    def test_admin_function_uses_existing_data_stack_tables(self):
+        admin_index = self.template.index("AdminFunction:")
+        admin_block = self.template[admin_index : self.template.index("PreferenceFunction:")]
+        for expected in (
+            "DB_ACCESS_MODE: mysql",
+            "RDS_HOST: !Ref RdsHost",
+            "RDS_SECRET_ARN: !Ref RdsSecretArn",
+            "RDS_DATABASE_NAME: !Ref RdsDatabaseName",
+            "ADMIN_DATA_PROPOSALS_TABLE_NAME: !Ref AdminDataProposalsTableName",
+            "ADMIN_DATA_PROPOSAL_HISTORY_TABLE_NAME: !Ref AdminDataProposalHistoryTableName",
+        ):
+            self.assertIn(expected, admin_block)
+
     def test_lovv_token_authorizer_allows_http_api_invoke(self):
         self.assertIn("AuthAuthorizerInvokePermission:", self.template)
         self.assertIn("Type: AWS::Lambda::Permission", self.template)
