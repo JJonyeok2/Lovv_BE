@@ -109,6 +109,7 @@ class ExistingDataStackTemplateTest(unittest.TestCase):
         self.assertIn("Default: http://localhost:5173,http://127.0.0.1:5173", self.template)
         self.assertIn("https://d3nuef0zacpyj.cloudfront.net", self.template)
         self.assertIn("https://lovv-admin-web.vercel.app", self.template)
+        self.assertIn("https://lovv-admin-web-skn26.vercel.app", self.template)
 
     def test_auth_function_exposes_cognito_bridge_route_without_cognito_infra_cutover(self):
         self.assertIn("AuthCognitoSession:", self.template)
