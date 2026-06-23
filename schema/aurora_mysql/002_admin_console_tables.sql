@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS user_role_assignments (
   grant_reason     VARCHAR(255) NULL,
   created_at       DATETIME(3)  NOT NULL,
   updated_at       DATETIME(3)  NOT NULL,
+  -- VIRTUAL (not STORED): the base columns user_id / organization_id below carry
+  -- FKs with CASCADE / SET NULL actions, which MySQL 8 forbids on base columns of
+  -- a STORED generated column. VIRTUAL keeps the unique active-row guarantee
+  -- (uq_user_role_active) without triggering that restriction.
   active_role_key  VARCHAR(220)
     GENERATED ALWAYS AS (
       CASE
@@ -46,7 +50,7 @@ CREATE TABLE IF NOT EXISTS user_role_assignments (
         THEN CONCAT(user_id, '#', role_code, '#', COALESCE(organization_id, ''))
         ELSE NULL
       END
-    ) STORED,
+    ) VIRTUAL,
   PRIMARY KEY (id),
   UNIQUE KEY uq_user_role_active (active_role_key),
   KEY idx_user_role_lookup (user_id, status, role_code, valid_from, valid_until),
@@ -81,6 +85,8 @@ CREATE TABLE IF NOT EXISTS user_region_assignments (
   grant_reason      VARCHAR(255) NULL,
   created_at        DATETIME(3)  NOT NULL,
   updated_at        DATETIME(3)  NOT NULL,
+  -- VIRTUAL (not STORED): same reason as user_role_assignments.active_role_key —
+  -- base columns carry CASCADE / SET NULL FKs, disallowed on STORED gen columns.
   active_region_key VARCHAR(220)
     GENERATED ALWAYS AS (
       CASE
@@ -88,7 +94,7 @@ CREATE TABLE IF NOT EXISTS user_region_assignments (
         THEN CONCAT(user_id, '#', region_id, '#', COALESCE(organization_id, ''))
         ELSE NULL
       END
-    ) STORED,
+    ) VIRTUAL,
   PRIMARY KEY (id),
   UNIQUE KEY uq_user_region_active (active_region_key),
   KEY idx_user_region_lookup (user_id, status, region_id, valid_from, valid_until),
@@ -250,12 +256,16 @@ CREATE TABLE IF NOT EXISTS admin_publish_jobs (
   KEY idx_admin_publish_job_proposal (proposal_id, created_at),
   KEY idx_admin_publish_job_destination (monthly_curated_destination_id, created_at),
   KEY idx_admin_publish_job_requested_by (requested_by, created_at),
+  -- RESTRICT (not SET NULL): proposal_id and monthly_curated_destination_id are
+  -- referenced by chk_admin_publish_job_resource. MySQL 8 (error 3823) forbids a
+  -- column from being in a CHECK while also being the target of a SET NULL /
+  -- CASCADE FK action, so these two resource FKs use RESTRICT.
   CONSTRAINT fk_admin_publish_job_proposal
     FOREIGN KEY (proposal_id) REFERENCES admin_data_proposals(id)
-    ON DELETE SET NULL ON UPDATE CASCADE,
+    ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT fk_admin_publish_job_destination
     FOREIGN KEY (monthly_curated_destination_id) REFERENCES monthly_curated_destinations(id)
-    ON DELETE SET NULL ON UPDATE CASCADE,
+    ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT fk_admin_publish_job_requested_by
     FOREIGN KEY (requested_by) REFERENCES users(id)
     ON DELETE SET NULL ON UPDATE CASCADE,
