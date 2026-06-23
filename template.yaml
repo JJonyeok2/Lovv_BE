@@ -5,7 +5,7 @@ Description: Lovv backend API for social auth, preferences, map/city, mock recom
 Parameters:
   AllowedCorsOrigin:
     Type: String
-    Default: http://localhost:5173,http://127.0.0.1:5173,https://d3nuef0zacpyj.cloudfront.net
+    Default: http://localhost:5173,http://127.0.0.1:5173,https://d3nuef0zacpyj.cloudfront.net,https://lovv-admin-web.vercel.app
     Description: Comma-separated browser origins allowed to send credentialed API requests.
   MapCityS3Bucket:
     Type: String
