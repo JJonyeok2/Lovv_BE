@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from admin.app import handle_request
 from admin.proposals_repository import InMemoryAdminProposalRepository
 from admin.monthly_destinations_repository import InMemoryMonthlyDestinationRepository
+from admin.publish_jobs_repository import InMemoryPublishJobRepository
 
 
 COLLECTION = "/api/v1/admin/monthly-destinations"
@@ -84,12 +85,14 @@ class MonthlyDestinationApiTests(unittest.TestCase):
     def setUp(self):
         self.proposals = InMemoryAdminProposalRepository()
         self.monthly = InMemoryMonthlyDestinationRepository()
+        self.jobs = InMemoryPublishJobRepository()
 
     def _call(self, method, path, body=None, context=None, query=None):
         return handle_request(
             make_event(method, path, body=body, authorizer_context=context, query=query),
             proposal_repository=self.proposals,
             monthly_repository=self.monthly,
+            publish_jobs_repository=self.jobs,
         )
 
     def test_promote_creates_candidate_from_approved_proposal(self):
