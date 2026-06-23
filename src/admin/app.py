@@ -19,6 +19,10 @@ from admin.monthly_destinations_repository import (
     MonthlyDestinationTransitionError,
     RdsDataMonthlyDestinationRepository,
 )
+from admin.publish_jobs_repository import (
+    PublishJobTransitionError,
+    RdsDataPublishJobRepository,
+)
 from shared.auth import AuthTokenError
 from shared.authorization import (
     AuthorizationError,
@@ -66,19 +70,31 @@ MONTHLY_FORBIDDEN_FIELDS = {
 }
 CURATION_MONTH_PATTERN = re.compile(r"^[0-9]{4}-[0-9]{2}$")
 
+# Publish jobs (step 12). A publish fans out into reflection jobs; clients only
+# drive their status machine and never set server-owned bookkeeping fields.
+PUBLISH_JOBS_COLLECTION_PATH = "/api/v1/admin/publish-jobs"
+PUBLISH_JOB_ACTIONS = {"start", "succeed", "fail", "retry", "cancel"}
+PUBLISH_JOB_FORBIDDEN_FIELDS = {
+    "id", "status", "attemptCount", "attempt_count", "requestedBy", "requested_by",
+    "startedAt", "started_at", "finishedAt", "finished_at",
+    "roles", "role", "userId", "user_id",
+}
+
 
 def lambda_handler(event, context):
     return handle_request(event or {})
 
 
-def handle_request(event, repository=None, proposal_repository=None, monthly_repository=None):
+def handle_request(event, repository=None, proposal_repository=None, monthly_repository=None, publish_jobs_repository=None):
     try:
-        return _handle_request(event or {}, repository, proposal_repository, monthly_repository)
+        return _handle_request(event or {}, repository, proposal_repository, monthly_repository, publish_jobs_repository)
     except AdminRequestError as error:
         return error_response(error.status_code, error.code, error.message)
     except ProposalTransitionError as error:
         return error_response(error.status_code, error.code, error.message)
     except MonthlyDestinationTransitionError as error:
+        return error_response(error.status_code, error.code, error.message)
+    except PublishJobTransitionError as error:
         return error_response(error.status_code, error.code, error.message)
     except AuthorizationError as error:
         return error_response(error.status_code, error.code, error.message)
@@ -89,7 +105,7 @@ def handle_request(event, repository=None, proposal_repository=None, monthly_rep
         return error_response(500, "INTERNAL_ERROR", "Internal server error")
 
 
-def _handle_request(event, repository, proposal_repository, monthly_repository=None):
+def _handle_request(event, repository, proposal_repository, monthly_repository=None, publish_jobs_repository=None):
     method = _event_method(event)
     path = _event_path(event)
 
@@ -227,15 +243,23 @@ def _handle_request(event, repository, proposal_repository, monthly_repository=N
     if method == "POST" and monthly_id and monthly_action in MONTHLY_ACTIONS:
         # Publish-state transitions are admin-only and validated against the state
         # machine in the repository (409 MONTHLY_TRANSITION_FORBIDDEN if illegal).
-        require_admin_access_principal = require_admin_access(event)
+        principal = require_admin_access(event)
         payload = _validate_monthly_action_payload(_json_body(event))
         monthly_repository = monthly_repository or RdsDataMonthlyDestinationRepository.from_env()
+        now = _now_iso()
         destination = monthly_repository.transition(
-            monthly_id, monthly_action, require_admin_access_principal, _now_iso(), payload=payload
+            monthly_id, monthly_action, principal, now, payload=payload
         )
         if not destination:
             raise AdminRequestError(404, "MONTHLY_DESTINATION_NOT_FOUND", "Monthly destination was not found")
-        return json_response(200, {"destination": _public_monthly_destination(destination)})
+        body = {"destination": _public_monthly_destination(destination)}
+        # Reflecting approved data = publishing it. A publish fans out into the
+        # downstream reflection jobs so the console can track each surface.
+        if monthly_action == "publish":
+            publish_jobs_repository = publish_jobs_repository or RdsDataPublishJobRepository.from_env()
+            jobs = publish_jobs_repository.enqueue_for_destination(monthly_id, principal, now)
+            body["reflectionJobs"] = [_public_publish_job(job) for job in jobs]
+        return json_response(200, body)
 
     if method == "GET" and monthly_id and path.endswith(f"/{monthly_id}"):
         principal = require_roles(event, {ROLE_ADMIN, ROLE_LOCAL_OPERATOR})
@@ -246,6 +270,35 @@ def _handle_request(event, repository, proposal_repository, monthly_repository=N
         if not has_any_role(principal, {ROLE_ADMIN}) and destination.get("regionId") not in set(principal.get("regionIds") or []):
             raise AdminRequestError(404, "MONTHLY_DESTINATION_NOT_FOUND", "Monthly destination was not found")
         return json_response(200, {"destination": _public_monthly_destination(destination)})
+
+    if method == "GET" and monthly_id and monthly_action == "publish-jobs":
+        # Reflection history for one destination (admin all, operator own regions).
+        principal = require_roles(event, {ROLE_ADMIN, ROLE_LOCAL_OPERATOR})
+        monthly_repository = monthly_repository or RdsDataMonthlyDestinationRepository.from_env()
+        destination = monthly_repository.get(monthly_id)
+        if not destination:
+            raise AdminRequestError(404, "MONTHLY_DESTINATION_NOT_FOUND", "Monthly destination was not found")
+        if not has_any_role(principal, {ROLE_ADMIN}) and destination.get("regionId") not in set(principal.get("regionIds") or []):
+            raise AdminRequestError(404, "MONTHLY_DESTINATION_NOT_FOUND", "Monthly destination was not found")
+        publish_jobs_repository = publish_jobs_repository or RdsDataPublishJobRepository.from_env()
+        limit = _parse_limit((event.get("queryStringParameters") or {}).get("limit"))
+        jobs = publish_jobs_repository.list_for_destination(monthly_id, limit=limit)
+        return json_response(200, {"items": [_public_publish_job(job) for job in jobs], "nextCursor": None})
+
+    publish_job_id = _publish_job_id(path)
+    publish_job_action = _publish_job_action(path, publish_job_id)
+    if method == "POST" and publish_job_id and publish_job_action in PUBLISH_JOB_ACTIONS:
+        # Drive a reflection job through its status machine. Admin-only; the state
+        # machine is enforced in the repository (409 PUBLISH_JOB_TRANSITION_FORBIDDEN).
+        principal = require_admin_access(event)
+        payload = _validate_publish_job_action_payload(_json_body(event))
+        publish_jobs_repository = publish_jobs_repository or RdsDataPublishJobRepository.from_env()
+        job = publish_jobs_repository.transition(
+            publish_job_id, publish_job_action, principal, _now_iso(), payload=payload
+        )
+        if not job:
+            raise AdminRequestError(404, "PUBLISH_JOB_NOT_FOUND", "Publish job was not found")
+        return json_response(200, {"job": _public_publish_job(job)})
 
     return error_response(404, "NOT_FOUND", "Route not found")
 
@@ -495,6 +548,58 @@ def _monthly_action(path, destination_id):
     if not destination_id:
         return None
     prefix = f"{MONTHLY_DESTINATION_COLLECTION_PATH}/{destination_id}/"
+    if not path.startswith(prefix):
+        return None
+    return path[len(prefix):].strip("/") or None
+
+
+def _validate_publish_job_action_payload(payload):
+    forbidden = sorted(PUBLISH_JOB_FORBIDDEN_FIELDS.intersection(payload.keys()))
+    if forbidden:
+        raise AdminRequestError(400, "INVALID_PUBLISH_JOB_PAYLOAD", "Authority fields are not writable")
+    allowed = {"errorCode", "errorMessage"}
+    unexpected = sorted(set(payload.keys()) - allowed)
+    if unexpected:
+        raise AdminRequestError(400, "INVALID_PUBLISH_JOB_PAYLOAD", "Action payload contains unsupported fields")
+    for key in ("errorCode", "errorMessage"):
+        value = payload.get(key)
+        if value not in (None, "") and not isinstance(value, str):
+            raise AdminRequestError(400, "INVALID_PUBLISH_JOB_PAYLOAD", f"{key} must be a string")
+    return {
+        "errorCode": _optional_string(payload.get("errorCode")),
+        "errorMessage": _optional_string(payload.get("errorMessage")),
+    }
+
+
+def _public_publish_job(job):
+    return {
+        "id": job.get("id"),
+        "proposalId": job.get("proposalId"),
+        "monthlyCuratedDestinationId": job.get("monthlyCuratedDestinationId"),
+        "jobType": job.get("jobType"),
+        "status": job.get("status"),
+        "attemptCount": job.get("attemptCount") or 0,
+        "lastErrorCode": job.get("lastErrorCode"),
+        "lastErrorMessage": job.get("lastErrorMessage"),
+        "requestedBy": job.get("requestedBy"),
+        "startedAt": job.get("startedAt"),
+        "finishedAt": job.get("finishedAt"),
+        "createdAt": job.get("createdAt"),
+        "updatedAt": job.get("updatedAt"),
+    }
+
+
+def _publish_job_id(path):
+    prefix = f"{PUBLISH_JOBS_COLLECTION_PATH}/"
+    if path.startswith(prefix):
+        return path[len(prefix):].split("/", 1)[0] or None
+    return None
+
+
+def _publish_job_action(path, job_id):
+    if not job_id:
+        return None
+    prefix = f"{PUBLISH_JOBS_COLLECTION_PATH}/{job_id}/"
     if not path.startswith(prefix):
         return None
     return path[len(prefix):].strip("/") or None
