@@ -133,6 +133,16 @@ class ExistingDataStackTemplateTest(unittest.TestCase):
         ):
             self.assertIn(expected, admin_block)
 
+    def test_admin_authz_cache_table_has_ttl(self):
+        self.assertIn("AdminAuthzCacheTable:", self.template)
+        self.assertIn("Type: AWS::DynamoDB::Table", self.template)
+        table_index = self.template.index("AdminAuthzCacheTable:")
+        block = self.template[table_index : table_index + 600]
+        self.assertIn("AttributeName: userId", block)
+        self.assertIn("KeyType: HASH", block)
+        self.assertIn("AttributeName: expiresAt", block)
+        self.assertIn("Enabled: true", block)
+
     def test_lovv_token_authorizer_allows_http_api_invoke(self):
         self.assertIn("AuthAuthorizerInvokePermission:", self.template)
         self.assertIn("Type: AWS::Lambda::Permission", self.template)
