@@ -36,6 +36,12 @@ class MySqlClient:
         self.secret_loader = secret_loader or _load_secret
         self.connection_factory = connection_factory or _pymysql_connection_factory
 
+        # Credential precedence: explicit args -> env (local Docker / dev) -> Secrets
+        # Manager. The env path lets DB_ACCESS_MODE=mysql connect to a local MySQL
+        # without a secret; the secret is only loaded when creds are still missing.
+        username = username or os.environ.get("MYSQL_USER") or os.environ.get("RDS_USER")
+        password = password or os.environ.get("MYSQL_PASSWORD") or os.environ.get("RDS_PW")
+
         secret = {}
         if self.secret_arn and (not username or not password):
             secret = _parse_secret(self.secret_loader(self.secret_arn))

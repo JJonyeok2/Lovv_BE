@@ -90,6 +90,29 @@ class MySqlDataClientTest(unittest.TestCase):
         )
         self.assertTrue(connection.closed)
 
+    def test_uses_env_credentials_without_a_secret(self):
+        import os
+
+        connection = FakeConnection(rows=[{"id": "user-1"}])
+        previous = {k: os.environ.get(k) for k in ("MYSQL_USER", "MYSQL_PASSWORD")}
+        os.environ["MYSQL_USER"] = "root"
+        os.environ["MYSQL_PASSWORD"] = "lovvlocal"
+        try:
+            client = MySqlClient(
+                host="127.0.0.1",
+                database="lovvdev",
+                connection_factory=lambda **kwargs: connection,
+            )
+            self.assertEqual(client.username, "root")
+            self.assertEqual(client.password, "lovvlocal")
+            self.assertEqual(client.fetch_all("SELECT id FROM users", {}), [{"id": "user-1"}])
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
     def test_execute_commits_writes(self):
         connection = FakeConnection()
         client = MySqlClient(
