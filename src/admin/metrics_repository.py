@@ -10,6 +10,9 @@ import os
 from shared.database import create_database_client
 
 
+# Maps an inbound event type to the daily counter column it increments. The
+# official vs partner link split (step 14) is two separate counters so official
+# and affiliate engagement can be reported independently.
 EVENT_COUNTER_COLUMNS = {
     "destination_impression": "destination_impressions",
     "destination_detail_open": "destination_detail_opens",
@@ -24,6 +27,9 @@ EVENT_COUNTER_COLUMNS = {
 }
 
 METRIC_COUNTER_FIELDS = tuple(EVENT_COUNTER_COLUMNS.values()) + ("distinct_user_count",)
+# k-anonymity threshold for B2G safety: a day's row is only marked
+# min_group_size_met once it has at least this many distinct users, so small
+# (re-identifiable) groups are flagged before any external reporting.
 MIN_GROUP_SIZE = 5
 
 
@@ -37,6 +43,9 @@ class RdsDataDestinationMetricsRepository:
         return cls()
 
     def record_event(self, destination, event_type, metric_date, now, increment=1, distinct_user_increment=0):
+        # Upsert the (destination, day) row: insert it if missing, otherwise add
+        # the increment to the matching counter. Only aggregate counts are stored,
+        # never raw per-user events.
         column = _counter_column(event_type)
         row = _empty_metrics_row(destination, metric_date, now)
         row[column] = int(increment)

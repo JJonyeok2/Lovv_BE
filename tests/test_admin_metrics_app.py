@@ -110,13 +110,29 @@ class AdminMetricsApiTests(unittest.TestCase):
                 },
                 context=admin_context(),
             )
+        self._call(
+            "POST",
+            f"{MONTHLY}/{destination['id']}/events",
+            body={
+                "eventType": "partner_link_click",
+                "metricDate": "2026-10-01",
+                "increment": 4,
+            },
+            context=admin_context(),
+        )
 
         response = self._call("GET", f"{MONTHLY}/{destination['id']}/metrics", context=admin_context())
         self.assertEqual(response["statusCode"], 200)
         metric = json.loads(response["body"])["items"][0]
         self.assertEqual(metric["officialLinkClicks"], 2)
+        self.assertEqual(metric["partnerLinkClicks"], 4)
         self.assertEqual(metric["distinctUserCount"], 6)
         self.assertTrue(metric["minGroupSizeMet"])
+
+        summary_response = self._call("GET", METRICS, context=admin_context())
+        summary = json.loads(summary_response["body"])["items"][0]
+        self.assertEqual(summary["officialLinkClicks"], 2)
+        self.assertEqual(summary["partnerLinkClicks"], 4)
 
     def test_lists_summary_scoped_by_local_operator_regions(self):
         own = self._destination(region_id="KR-42-150")
@@ -185,4 +201,3 @@ class AdminMetricsApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
