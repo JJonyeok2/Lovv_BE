@@ -46,11 +46,11 @@ def cors_headers(event=None):
     headers = dict(DEFAULT_HEADERS)
     allowed_origins = _allowed_origins()
     origin = _header_value((event or {}).get("headers") or {}, "origin")
+    if not origin and allowed_origins:
+        origin = allowed_origins[0]
     if origin and origin in allowed_origins:
         headers["Access-Control-Allow-Origin"] = origin
     else:
-        # If the origin is not matched or event is missing, omit the Access-Control-Allow-Origin header.
-        # This allows the API Gateway's native CORS settings (AllowOrigins) to handle the headers.
         if "Access-Control-Allow-Origin" in headers:
             del headers["Access-Control-Allow-Origin"]
     if len(allowed_origins) > 1:

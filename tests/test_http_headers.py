@@ -50,7 +50,7 @@ class HttpHeadersTest(unittest.TestCase):
                 event={"headers": {"Origin": "https://attacker.example"}},
             )
 
-        self.assertEqual(response["headers"]["Access-Control-Allow-Origin"], "http://localhost:5173")
+        self.assertNotIn("Access-Control-Allow-Origin", response["headers"])
 
 
 if __name__ == "__main__":
