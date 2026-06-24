@@ -1,0 +1,6 @@
+# Local development dependencies (not bundled into the Lambda package).
+# Lambda runtime deps live in src/requirements.txt; install these to run the dev
+# helper scripts (scripts/*.py) and to work against the local Docker MySQL.
+#   pip install -r requirements-dev.txt
+PyMySQL>=1.1.0,<2   # local MySQL access (also the Lambda dep)
+boto3>=1.34         # Secrets Manager access for dev scripts (provided by the Lambda runtime in prod)

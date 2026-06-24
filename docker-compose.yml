@@ -1,0 +1,33 @@
+# Local dev database for Lovv_BE.
+# Runs MySQL 8.0 (matching Aurora MySQL 8 / utf8mb4_0900_ai_ci) and auto-applies
+# the schema migrations on first start. The dev helper scripts and (with a secret)
+# the handlers can point at it instead of tunnelling to the shared dev RDS.
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: lovv-dev-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: lovvlocal
+      MYSQL_DATABASE: lovvdev
+    # Match the schema collation and use native auth so PyMySQL connects cleanly.
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-authentication-plugin=mysql_native_password
+    ports:
+      - "13306:3306"  # host 13306 -> container 3306 (avoids local MySQL on 3306)
+    volumes:
+      # On FIRST start (empty data volume), MySQL runs every .sql here in
+      # filename order: 001 -> 002 -> 003. FKs to users(id) resolve because 001
+      # (users) runs before 002/003.
+      - ./schema/aurora_mysql:/docker-entrypoint-initdb.d:ro
+      - lovv_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-plovvlocal"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  lovv_mysql_data:
