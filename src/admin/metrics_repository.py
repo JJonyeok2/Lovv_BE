@@ -27,6 +27,12 @@ EVENT_COUNTER_COLUMNS = {
 }
 
 METRIC_COUNTER_FIELDS = tuple(EVENT_COUNTER_COLUMNS.values()) + ("distinct_user_count",)
+# TODO(metrics): distinct_user_count is accumulated additively from the caller's
+# distinct_user_increment, so it is only correct if the API layer de-duplicates a
+# user's repeat events before calling record_event. Until a raw-event table with
+# COUNT(DISTINCT user_id) batch aggregation replaces this, an over-count could
+# wrongly satisfy MIN_GROUP_SIZE and weaken the k-anonymity guarantee. Treat the
+# current counter as a PoC approximation, not a privacy boundary.
 # k-anonymity threshold for B2G safety: a day's row is only marked
 # min_group_size_met once it has at least this many distinct users, so small
 # (re-identifiable) groups are flagged before any external reporting.
