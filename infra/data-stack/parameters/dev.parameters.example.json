@@ -24,6 +24,14 @@
     "ParameterValue": "10.40.0.0/16"
   },
   {
+    "ParameterKey": "EnableNatInstance",
+    "ParameterValue": "false"
+  },
+  {
+    "ParameterKey": "PublicSubnetCidr",
+    "ParameterValue": "10.40.1.0/24"
+  },
+  {
     "ParameterKey": "PrivateSubnetACidr",
     "ParameterValue": "10.40.10.0/24"
   },
@@ -38,5 +46,9 @@
   {
     "ParameterKey": "RDSDeletionProtection",
     "ParameterValue": "true"
+  },
+  {
+    "ParameterKey": "NatInstanceType",
+    "ParameterValue": "t4g.nano"
   }
 ]
