@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from auth.user_repository import RdsDataUserRepository
+from auth.authz_cache_repository import InMemoryAuthzCacheRepository
 
 
 class FakeSqlClient:
@@ -62,6 +63,42 @@ class UserRepositoryAuthorizationTest(unittest.TestCase):
         self.assertIn("FROM user_region_assignments", client.fetch_all_calls[1]["sql"])
         self.assertIn("valid_from <= UTC_TIMESTAMP(3)", client.fetch_all_calls[0]["sql"])
         self.assertIn("(valid_until IS NULL OR valid_until > UTC_TIMESTAMP(3))", client.fetch_all_calls[1]["sql"])
+
+class AuthzCacheIntegrationTest(unittest.TestCase):
+    def _user_row(self):
+        return {
+            "id": "user-1",
+            "email": "user@example.com",
+            "display_name": "Lovv User",
+            "avatar_url": None,
+            "birth_date": None,
+            "gender": None,
+            "created_at": "2026-06-10T09:00:00Z",
+            "status": "active",
+            "role": "user",
+        }
+
+    def test_cache_hit_skips_role_and_region_queries(self):
+        cache = InMemoryAuthzCacheRepository()
+        client = FakeSqlClient(
+            fetch_one_rows=[self._user_row(), self._user_row()],
+            fetch_all_rows=[
+                [{"role_code": "R-ADMIN", "organization_id": None}],
+                [],
+            ],
+        )
+        repository = RdsDataUserRepository(rds_client=client, authz_cache=cache)
+
+        first = repository.get_user("user-1")
+        self.assertIn("R-ADMIN", first["roles"])
+        self.assertEqual(len(client.fetch_all_calls), 2)  # role + region on miss
+        self.assertEqual(cache.put_calls, 1)
+
+        second = repository.get_user("user-1")
+        self.assertEqual(second["roles"], first["roles"])
+        self.assertEqual(second["regionIds"], first["regionIds"])
+        # No additional role/region queries on the cache hit.
+        self.assertEqual(len(client.fetch_all_calls), 2)
 
 
 if __name__ == "__main__":

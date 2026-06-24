@@ -164,6 +164,10 @@ Parameters:
     Type: String
     Default: lovv_dev_auth_sessions
     Description: Existing Lovv Data Stack DynamoDB auth sessions table name.
+  AuthAuthzCacheTableName:
+    Type: String
+    Default: lovv_dev_admin_authz_cache
+    Description: DynamoDB table caching derived admin authorization (roles/org/region) with TTL.
   UsersTableName:
     Type: String
     Default: users
@@ -371,6 +375,23 @@ Resources:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
 
+  # Managed cache table for derived admin authorization. Items carry an
+  # expiresAt epoch; DynamoDB TTL auto-purges them after the cache window.
+  AdminAuthzCacheTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref AuthAuthzCacheTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
   AuthFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -389,6 +410,8 @@ Resources:
           AUTH_ISSUER: !Ref AuthIssuer
           AUTH_AUDIENCE: !Ref AuthAudience
           AUTH_SESSIONS_TABLE_NAME: !Ref AuthSessionsTableName
+          AUTH_AUTHZ_CACHE_TABLE_NAME: !Ref AuthAuthzCacheTableName
+          ADMIN_AUTHZ_CACHE_TTL_SECONDS: '300'
           GOOGLE_CLIENT_ID: !Ref GoogleClientId
           GOOGLE_CLIENT_SECRET: !Ref GoogleClientSecret
           KAKAO_CLIENT_ID: !Ref KakaoClientId
@@ -415,6 +438,13 @@ Resources:
               Resource:
                 - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuthSessionsTableName}
                 - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuthSessionsTableName}/index/GSI1RefreshTokenHashLookup
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:DeleteItem
+              Resource:
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuthAuthzCacheTableName}
             - Effect: Allow
               Action:
                 - secretsmanager:GetSecretValue

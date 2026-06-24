@@ -4,6 +4,8 @@
 
 import dataclasses
 import os
+
+from auth.authz_cache_repository import DynamoDbAuthzCacheRepository
 import uuid
 
 from shared.database import create_database_client
@@ -31,8 +33,10 @@ class RdsDataUserRepository:
         social_accounts_table=None,
         role_assignments_table=None,
         region_assignments_table=None,
+        authz_cache=None,
     ):
         self.rds = rds_client or create_database_client()
+        self.authz_cache = authz_cache
         self.users_table = users_table or os.environ.get("USERS_TABLE_NAME", "users")
         self.social_accounts_table = social_accounts_table or os.environ.get("SOCIAL_ACCOUNTS_TABLE_NAME", "social_accounts")
         self.role_assignments_table = role_assignments_table or os.environ.get("USER_ROLE_ASSIGNMENTS_TABLE_NAME", "user_role_assignments")
@@ -40,7 +44,15 @@ class RdsDataUserRepository:
 
     @classmethod
     def from_env(cls):
-        return cls()
+        # Build the authz cache best-effort: if it is not configured (or boto3 is
+        # unavailable), caching is simply disabled and every call hits MySQL.
+        authz_cache = None
+        try:
+            candidate = DynamoDbAuthzCacheRepository.from_env()
+            authz_cache = candidate if candidate.enabled else None
+        except Exception:
+            authz_cache = None
+        return cls(authz_cache=authz_cache)
 
     def upsert_from_provider(self, identity, now):
         linked = self._find_by_social(identity.provider, identity.provider_user_id)
@@ -247,10 +259,20 @@ class RdsDataUserRepository:
         # The DB is the source of truth for admin authority: merge the legacy
         # users.role with the active role/region assignments so the issued token
         # reflects current grants (revoking an assignment drops it on next login).
+        # A short-TTL cache (when configured) short-circuits the SQL round-trips.
         if not user:
             return None
-        role_assignments = self._active_role_assignments(user["userId"])
-        region_assignments = self._active_region_assignments(user["userId"])
+        user_id = user["userId"]
+        if self.authz_cache is not None:
+            cached = self.authz_cache.get(user_id)
+            if cached is not None:
+                user["roles"] = list(cached["roles"])
+                user["organizationIds"] = list(cached["organizationIds"])
+                user["regionIds"] = list(cached["regionIds"])
+                user["authzVersion"] = cached["authzVersion"]
+                return user
+        role_assignments = self._active_role_assignments(user_id)
+        region_assignments = self._active_region_assignments(user_id)
         user["roles"] = _merge_unique(
             roles_for_db_role(user.get("role"))
             + [row.get("role_code") for row in role_assignments]
@@ -261,6 +283,16 @@ class RdsDataUserRepository:
         )
         user["regionIds"] = _merge_unique([row.get("region_id") for row in region_assignments])
         user["authzVersion"] = 1
+        if self.authz_cache is not None:
+            self.authz_cache.put(
+                user_id,
+                {
+                    "roles": user["roles"],
+                    "organizationIds": user["organizationIds"],
+                    "regionIds": user["regionIds"],
+                    "authzVersion": user["authzVersion"],
+                },
+            )
         return user
 
     def _active_role_assignments(self, user_id):
