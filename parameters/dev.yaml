@@ -1,5 +1,5 @@
 - ParameterKey: AllowedCorsOrigin
-  ParameterValue: "http://127.0.0.1:5173,http://localhost:5173,https://d3nuef0zacpyj.cloudfront.net"
+  ParameterValue: "http://127.0.0.1:5173,http://localhost:5173,https://d3nuef0zacpyj.cloudfront.net,https://dkyiemfaw3g04.cloudfront.net,https://lovv-admin-web.vercel.app,https://lovv-admin-web-skn26.vercel.app,https://lovv-admin-web-eta.vercel.app"
 - ParameterKey: MapCityS3Bucket
   ParameterValue: "lovv-data-pipeline-dev-925273580929"
 - ParameterKey: MapCityS3Prefix
@@ -45,9 +45,9 @@
 - ParameterKey: CognitoHostedUiDomainPrefix
   ParameterValue: "lovv-dev-auth-925273580929"
 - ParameterKey: CognitoCallbackUrls
-  ParameterValue: "http://127.0.0.1:5173/auth/callback/cognito,http://localhost:5173/auth/callback/cognito,https://d3nuef0zacpyj.cloudfront.net/auth/callback/cognito"
+  ParameterValue: "http://127.0.0.1:5173/auth/callback/cognito,http://localhost:5173/auth/callback/cognito,https://d3nuef0zacpyj.cloudfront.net/auth/callback/cognito,https://lovv-admin-web.vercel.app/auth/callback/cognito,https://lovv-admin-web-skn26.vercel.app/auth/callback/cognito,https://lovv-admin-web-eta.vercel.app/auth/callback/cognito"
 - ParameterKey: CognitoLogoutUrls
-  ParameterValue: "http://127.0.0.1:5173/,http://localhost:5173/,https://d3nuef0zacpyj.cloudfront.net/"
+  ParameterValue: "http://127.0.0.1:5173/,http://localhost:5173/,https://d3nuef0zacpyj.cloudfront.net/,https://lovv-admin-web.vercel.app/,https://lovv-admin-web-skn26.vercel.app/,https://lovv-admin-web-eta.vercel.app/"
 - ParameterKey: CognitoGoogleClientId
   ParameterValue: "337263925212-pqoj53s7rhd7cbp5hk91vbcq3qrvavkg.apps.googleusercontent.com"
 - ParameterKey: CognitoGoogleClientSecret

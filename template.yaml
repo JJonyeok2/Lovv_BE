@@ -243,7 +243,14 @@ Resources:
           - PATCH
           - DELETE
           - OPTIONS
-        AllowOrigins: !Split [",", !Ref AllowedCorsOrigin]
+        AllowOrigins:
+          - http://127.0.0.1:5173
+          - http://localhost:5173
+          - https://d3nuef0zacpyj.cloudfront.net
+          - https://dkyiemfaw3g04.cloudfront.net
+          - https://lovv-admin-web.vercel.app
+          - https://lovv-admin-web-skn26.vercel.app
+          - https://lovv-admin-web-eta.vercel.app
       Auth:
         Authorizers:
           LovvTokenAuthorizer:
