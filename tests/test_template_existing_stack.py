@@ -214,10 +214,26 @@ class ExistingDataStackTemplateTest(unittest.TestCase):
     def test_agentcore_runtime_arn_is_environment_parameter(self):
         self.assertIn("AgentCoreRuntimeArn:", self.template)
         index = self.template.index("AgentCoreFunction:")
-        block = self.template[index : index + 900]
+        block = self.template[index : index + 1300]
 
         self.assertIn("BEDROCK_AGENT_ARN: !Ref AgentCoreRuntimeArn", block)
         self.assertIn('Resource: !Sub "${AgentCoreRuntimeArn}*"', block)
+
+    def test_agentcore_openrouteservice_key_is_server_side_noecho_parameter(self):
+        self.assertIn("OpenRouteServiceApiKey:", self.template)
+        parameter_index = self.template.index("OpenRouteServiceApiKey:")
+        self.assertIn("NoEcho: true", self.template[parameter_index : parameter_index + 180])
+        self.assertIn("OpenRouteServiceApiKeySsmName:", self.template)
+
+        agentcore_index = self.template.index("AgentCoreFunction:")
+        agentcore_block = self.template[agentcore_index : agentcore_index + 1300]
+
+        self.assertIn("OPENROUTESERVICE_API_KEY: !Ref OpenRouteServiceApiKey", agentcore_block)
+        self.assertIn("OPENROUTESERVICE_API_KEY_SSM_NAME: !Ref OpenRouteServiceApiKeySsmName", agentcore_block)
+        self.assertIn("OPENROUTESERVICE_PROFILE: !Ref OpenRouteServiceProfile", agentcore_block)
+        self.assertIn("OPENROUTESERVICE_TIMEOUT_SECONDS: !Ref OpenRouteServiceTimeoutSeconds", agentcore_block)
+        self.assertIn("ssm:GetParameter", agentcore_block)
+        self.assertIn("parameter${OpenRouteServiceApiKeySsmName}", agentcore_block)
 
 
 class ExistingDataStackSchemaTest(unittest.TestCase):

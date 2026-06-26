@@ -9,6 +9,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
+from agentcore import routing
 from shared.http import error_response, json_response
 from shared.logger import Tag, get_logger
 
@@ -224,15 +225,30 @@ def _invoke_bedrock_agent(payload):
 
     # 8. 생성된 일(Day)별 여행 코스가 실존할 때만 기본 모의 일정을 대체하여 덮어쓰기
     if isinstance(itinerary, dict) and itinerary.get("days"):
+        itinerary_title = itinerary.get("title") or _real_itinerary_title(res["destination"], itinerary.get("tripType", payload["tripType"]))
+        itinerary_summary = (
+            itinerary.get("summary")
+            or (explainability.get("itineraryFlowReason", "") if explainability else "")
+            or _real_itinerary_summary(res["destination"])
+        )
         res["itinerary"] = {
             "tripType": itinerary.get("tripType", payload["tripType"]),
-            "title": res["itinerary"]["title"],
-            "summary": explainability.get("itineraryFlowReason", "") if explainability else "",
+            "title": itinerary_title,
+            "summary": itinerary_summary,
             "durationLabel": _duration_label(itinerary.get("tripType", payload["tripType"])),
             "days": itinerary["days"],
         }
+        routing.enrich_itinerary_routes(res["itinerary"])
         if "saveCompatibility" in res and "payload" in res["saveCompatibility"]:
-            res["saveCompatibility"]["payload"]["itinerary"] = {"days": itinerary["days"]}
+            res["saveCompatibility"]["payload"]["title"] = itinerary_title
+            res["saveCompatibility"]["payload"]["summary"] = itinerary_summary
+            res["saveCompatibility"]["payload"]["destination"] = {
+                "destinationId": res["destination"]["destinationId"],
+                "name": res["destination"]["name"],
+                "country": res["destination"]["country"],
+                "region": res["destination"]["region"],
+            }
+            res["saveCompatibility"]["payload"]["itinerary"] = {"days": res["itinerary"]["days"]}
 
     return res
 
@@ -256,6 +272,16 @@ def _validate_payload(body):
     if entry_type == "map_marker" and not body.get("destinationId"):
         raise AgentCoreRequestError(400, "VALIDATION_ERROR", "destinationId is required for map marker entry")
     return body
+
+
+def _real_itinerary_title(destination, trip_type):
+    destination_name = destination.get("name") or destination.get("destinationId") or "추천 소도시"
+    return f"{destination_name} {_duration_label(trip_type)} 추천 일정"
+
+
+def _real_itinerary_summary(destination):
+    destination_name = destination.get("name") or destination.get("destinationId") or "선택한 소도시"
+    return f"{destination_name}의 장소와 이동 흐름을 반영한 AI 추천 일정입니다."
 
 
 def _mock_recommendation(payload):
