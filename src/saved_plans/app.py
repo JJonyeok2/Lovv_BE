@@ -62,8 +62,13 @@ def _handle_request(event, repository=None):
     if method == "OPTIONS":
         return json_response(200, {})
 
-    # 1. JWT 클레임에서 사용자 식별자 획득
-    user_id = _current_user_id(event)
+    # GET /api/v1/itineraries/public은 인증 없이 접근 가능
+    if method == "GET" and path == "/api/v1/itineraries/public":
+        repository = repository or RdsDataSavedPlanRepository.from_env()
+        return _list_public_plans(event, repository)
+
+    # 1. JWT 클레임에서 사용자 식별자 획득 (퍼블릭 조회는 토큰 없어도 됨)
+    user_id = _optional_user_id(event) if (method == "GET" and path.startswith("/api/v1/itineraries/")) else _current_user_id(event)
     repository = repository or RdsDataSavedPlanRepository.from_env()
     itinerary_id = _itinerary_id(event, path)
 
@@ -75,8 +80,10 @@ def _handle_request(event, repository=None):
     if method == "GET" and path == "/api/v1/me/itineraries":
         return _list_plans(event, user_id, repository)
         
-    # 4. GET /api/v1/me/itineraries/{itineraryId}: 특정 일정 상세 조회
-    if method == "GET" and itinerary_id and path.endswith(f"/{itinerary_id}"):
+    # 4. GET /api/v1/me/itineraries/{itineraryId} or GET /api/v1/itineraries/{itineraryId}: 특정 일정 상세 조회
+    if method == "GET" and itinerary_id and (path.startswith("/api/v1/me/itineraries/") or path.startswith("/api/v1/itineraries/")) and path.endswith(f"/{itinerary_id}"):
+        if path.startswith("/api/v1/me/") and not user_id:
+            raise SavedPlanRequestError(401, "UNAUTHORIZED", "Authentication is required")
         return _get_plan(user_id, itinerary_id, repository)
         
     # 5. DELETE /api/v1/me/itineraries/{itineraryId}: 특정 일정 영구 삭제
@@ -90,6 +97,14 @@ def _handle_request(event, repository=None):
     # 7. DELETE /api/v1/me/itineraries/{itineraryId}/reactions/like: 좋아요 취소
     if method == "DELETE" and itinerary_id and path.endswith(f"/{itinerary_id}/reactions/like"):
         return _set_like(user_id, itinerary_id, False, repository)
+
+    # 8. PATCH /api/v1/me/itineraries/{itineraryId}/share: 공개 여부 변경
+    if method == "PATCH" and itinerary_id and path.endswith(f"/{itinerary_id}/share"):
+        return _share_plan(event, user_id, itinerary_id, repository)
+
+    # 9. POST /api/v1/me/itineraries/{itineraryId}/clone: 타인의 공개 일정 복제
+    if method == "POST" and itinerary_id and path.endswith(f"/{itinerary_id}/clone"):
+        return _clone_plan(user_id, itinerary_id, repository)
 
     return error_response(404, "NOT_FOUND", "Route not found")
 
@@ -124,8 +139,8 @@ def _list_plans(event, user_id, repository):
 
 
 def _get_plan(user_id, itinerary_id, repository):
-    """사용자가 소유한 특정 여행 일정 상세 데이터 로드"""
-    plan = repository.get_owned(user_id, itinerary_id)
+    """사용자가 소유하거나 공개된 특정 여행 일정 상세 데이터 로드"""
+    plan = repository.get_public_or_owned(user_id, itinerary_id)
     if not plan:
         raise SavedPlanRequestError(404, "ITINERARY_NOT_FOUND", "Saved itinerary was not found")
     return json_response(200, _public_detail(plan))
@@ -218,6 +233,8 @@ def _public_detail(plan):
         "itinerary": plan.get("itinerary") or {},
         "alternativeItinerary": plan.get("alternativeItinerary"),
         "isLiked": bool(plan.get("isLiked")),
+        "isPublic": bool(plan.get("isPublic")),
+        "copiedFromItineraryId": plan.get("copiedFromItineraryId"),
         "savedAt": plan.get("savedAt"),
         "updatedAt": plan.get("updatedAt"),
     }
@@ -265,10 +282,10 @@ def _itinerary_id(event, path):
     path_parameters = event.get("pathParameters") or {}
     if path_parameters.get("itineraryId"):
         return path_parameters["itineraryId"]
-    prefix = "/api/v1/me/itineraries/"
-    if path.startswith(prefix):
-        remainder = path[len(prefix) :]
-        return remainder.split("/", 1)[0]
+    for prefix in ("/api/v1/me/itineraries/", "/api/v1/itineraries/"):
+        if path.startswith(prefix):
+            remainder = path[len(prefix) :]
+            return remainder.split("/", 1)[0]
     return None
 
 
@@ -320,6 +337,49 @@ def _day_entries(day):
 def _now_iso():
     """현재 시각을 UTC 기준 ISO 8601 포맷으로 변환"""
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _share_plan(event, user_id, itinerary_id, repository):
+    """일정의 공개 여부 상태를 변경"""
+    body = _json_body(event)
+    is_public = body.get("isPublic")
+    if not isinstance(is_public, bool):
+        raise SavedPlanRequestError(400, "VALIDATION_ERROR", "isPublic must be a boolean")
+    plan = repository.update_share_status(user_id, itinerary_id, is_public, _now_iso())
+    if not plan:
+        raise SavedPlanRequestError(404, "ITINERARY_NOT_FOUND", "Saved itinerary was not found")
+    return json_response(200, _public_detail(plan))
+
+
+def _clone_plan(user_id, itinerary_id, repository):
+    """타인의 공개 일정을 내 마이페이지에 저장하기 위해 복제"""
+    plan = repository.clone_itinerary(user_id, itinerary_id, _now_iso())
+    if not plan:
+        raise SavedPlanRequestError(404, "ITINERARY_NOT_FOUND", "Source public itinerary was not found")
+    LOGGER.info(
+        Tag.PLAN,
+        "Itinerary cloned (userId=%s, sourceId=%s, newId=%s)",
+        user_id,
+        itinerary_id,
+        plan["itineraryId"],
+    )
+    return json_response(201, _public_detail(plan))
+
+
+def _list_public_plans(event, repository):
+    """모든 공개 일정을 리스트 형태로 조회"""
+    user_id = _optional_user_id(event)
+    limit = _parse_limit((event.get("queryStringParameters") or {}).get("limit"))
+    items = repository.list_public(limit=limit, user_id=user_id)
+    return json_response(200, {"items": items, "nextCursor": None})
+
+
+def _optional_user_id(event):
+    """토큰이 유효하면 사용자 ID를 추출하고, 유효하지 않거나 없으면 None 반환"""
+    try:
+        return _current_user_id(event)
+    except Exception:
+        return None
 
 
 # EOF: src/saved_plans/app.py
