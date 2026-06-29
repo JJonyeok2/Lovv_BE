@@ -503,6 +503,71 @@ class SavedPlansAppTest(unittest.TestCase):
         self.assertEqual(len(body["items"]), 1)
         self.assertEqual(response["headers"]["Access-Control-Allow-Origin"], "http://localhost:5173")
 
+    def test_sharing_toggling_detail_access_and_cloning_api(self):
+        # 1. Save an itinerary as user-1
+        saved = handle_request(make_event("POST", "/api/v1/me/itineraries", save_payload(), user_id="user-1"), repository=self.repository)
+        itinerary_id = json.loads(saved["body"])["itineraryId"]
+        self.assertEqual(saved["statusCode"], 201)
+
+        # 2. user-2 tries to view detail of user-1's private itinerary (must return 404/403 or ITINERARY_NOT_FOUND)
+        unauth_view = handle_request(
+            make_event("GET", f"/api/v1/me/itineraries/{itinerary_id}", user_id="user-2", path_parameters={"itineraryId": itinerary_id}),
+            repository=self.repository,
+        )
+        self.assertEqual(unauth_view["statusCode"], 404)
+
+        # 3. user-1 makes it public
+        share_res = handle_request(
+            make_event("PATCH", f"/api/v1/me/itineraries/{itinerary_id}/share", save_payload(isPublic=True), user_id="user-1", path_parameters={"itineraryId": itinerary_id}),
+            repository=self.repository,
+        )
+        self.assertEqual(share_res["statusCode"], 200)
+        self.assertTrue(json.loads(share_res["body"])["isPublic"])
+
+        # 4. user-2 can now view it
+        auth_view_shared = handle_request(
+            make_event("GET", f"/api/v1/me/itineraries/{itinerary_id}", user_id="user-2", path_parameters={"itineraryId": itinerary_id}),
+            repository=self.repository,
+        )
+        self.assertEqual(auth_view_shared["statusCode"], 200)
+        self.assertTrue(json.loads(auth_view_shared["body"])["isPublic"])
+
+        # 5. Guest user (no user_id) can view it via public path
+        guest_view = handle_request(
+            make_event("GET", f"/api/v1/itineraries/{itinerary_id}", user_id=None, path_parameters={"itineraryId": itinerary_id}),
+            repository=self.repository,
+        )
+        self.assertEqual(guest_view["statusCode"], 200)
+        self.assertTrue(json.loads(guest_view["body"])["isPublic"])
+
+        # 6. Guest user (no user_id) trying to view private itinerary should fail
+        private_id = "some-private-id"
+        self.repository.plans[private_id] = {"itineraryId": private_id, "userId": "user-1", "isPublic": False, "deletedAt": None}
+        guest_view_private = handle_request(
+            make_event("GET", f"/api/v1/itineraries/{private_id}", user_id=None, path_parameters={"itineraryId": private_id}),
+            repository=self.repository,
+        )
+        self.assertEqual(guest_view_private["statusCode"], 404)
+
+        # 7. List public plans (guest)
+        public_list = handle_request(
+            make_event("GET", "/api/v1/itineraries/public", user_id=None),
+            repository=self.repository,
+        )
+        self.assertEqual(public_list["statusCode"], 200)
+        self.assertEqual(len(json.loads(public_list["body"])["items"]), 1)
+
+        # 8. Clone itinerary as user-2
+        clone_res = handle_request(
+            make_event("POST", f"/api/v1/me/itineraries/{itinerary_id}/clone", user_id="user-2", path_parameters={"itineraryId": itinerary_id}),
+            repository=self.repository,
+        )
+        self.assertEqual(clone_res["statusCode"], 201)
+        cloned_body = json.loads(clone_res["body"])
+        self.assertEqual(cloned_body["ownerId"], "user-2")
+        self.assertEqual(cloned_body["copiedFromItineraryId"], itinerary_id)
+        self.assertFalse(cloned_body["isPublic"])
+
 
 if __name__ == "__main__":
     unittest.main()

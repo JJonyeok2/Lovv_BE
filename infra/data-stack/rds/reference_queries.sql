@@ -62,12 +62,12 @@ INSERT INTO itineraries (
   id, user_id, title, summary, duration_label, festival_choice, intensity_label,
   preference_snapshot, request_summary, source_recommendation_id, idempotency_key,
   snapshot_hash, destination_json, trip_type, themes_json, conditions_snapshot_json,
-  alternative_itinerary_json, saved_at, created_at, updated_at
+  itinerary_json, alternative_itinerary_json, saved_at, created_at, updated_at
 ) VALUES (
   :id, :user_id, :title, :summary, :duration_label, :festival_choice, :intensity_label,
   :preference_snapshot, :request_summary, :source_recommendation_id, :idempotency_key,
   :snapshot_hash, :destination_json, :trip_type, :themes_json,
-  :conditions_snapshot_json, :alternative_itinerary_json,
+  :conditions_snapshot_json, :itinerary_json, :alternative_itinerary_json,
   :now, :now, :now
 );
 
@@ -82,7 +82,7 @@ LIMIT :limit OFFSET :offset;
 
 -- G. 일정 상세: 일정 원장과 세부 방문 항목을 일차/방문 순서대로 조회한다.
 SELECT i.id AS itinerary_id, i.title, i.summary, i.preference_snapshot,
-       i.destination_json, i.themes_json, i.conditions_snapshot_json,
+       i.destination_json, i.themes_json, i.conditions_snapshot_json, i.itinerary_json,
        it.day_index, it.sort_order, it.time_slot, it.place_name, it.content_id,
        it.place_id, it.latitude, it.longitude, it.move_hint,
        it.recommendation_reason, it.body, it.source_badges

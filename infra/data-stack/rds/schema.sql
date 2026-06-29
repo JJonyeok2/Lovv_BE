@@ -93,6 +93,7 @@ CREATE TABLE itineraries (
   trip_type                    VARCHAR(50)  NULL,
   themes_json                  JSON         NULL,
   conditions_snapshot_json     JSON         NULL,
+  itinerary_json               JSON         NULL,
   alternative_itinerary_json   JSON         NULL,
   saved_at                     DATETIME     NOT NULL,
   created_at                   DATETIME     NOT NULL,

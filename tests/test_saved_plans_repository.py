@@ -5,6 +5,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from saved_plans.repository import RdsDataSavedPlanRepository, canonical_snapshot_hash
+from shared.rds_data import json_dumps
 
 
 def save_payload(**overrides):
@@ -98,8 +99,8 @@ class SavedPlansRepositorySchemaTest(unittest.TestCase):
 
         self.assertFalse(duplicate)
         self.assertEqual(plan["itineraryId"], item_params["itinerary_id"])
-        self.assertNotIn(" request_summary, itinerary_json,", itinerary_insert)
-        self.assertNotIn(":itinerary_json", itinerary_insert)
+        self.assertIn("itinerary_json", itinerary_insert)
+        self.assertIn(":itinerary_json", itinerary_insert)
         self.assertNotIn("is_liked", itinerary_insert)
         self.assertIn("created_at", itinerary_insert)
         self.assertIn("day_index", item_insert)
@@ -107,6 +108,80 @@ class SavedPlansRepositorySchemaTest(unittest.TestCase):
         self.assertEqual(item_params["sort_order"], 2)
         self.assertEqual(item_params["place_name"], "하회마을")
         self.assertEqual(item_params["source_badges"], "[\"festival\"]")
+        self.assertIn('"days"', next(call["parameters"] for call in client.executed if "INSERT INTO itineraries" in call["sql"])["itinerary_json"])
+
+    def test_list_preserves_snapshot_route_when_rehydrating_item_rows(self):
+        snapshot_itinerary = {
+            "days": [
+                {
+                    "day": 1,
+                    "title": "도로 경로 포함",
+                    "summary": "route snapshot",
+                    "route": {
+                        "provider": "openrouteservice",
+                        "geometry": {"type": "LineString", "coordinates": [[128.947, 37.771], [128.908, 37.805]]},
+                        "distanceMeters": 4200,
+                        "durationSeconds": 780,
+                    },
+                    "stops": [
+                        {"time": "아침", "title": "안목해변", "move": "13분", "latitude": 37.771, "longitude": 128.947}
+                    ],
+                }
+            ]
+        }
+        client = FakeSqlClient(
+            fetch_all_rows=[
+                [
+                    {
+                        "id": "plan-1",
+                        "user_id": "user-1",
+                        "source_recommendation_id": "rec-1",
+                        "title": "강릉 1박 2일",
+                        "summary": "바다 산책",
+                        "destination_json": "{\"destinationId\":\"KR-Gangneung\",\"name\":\"강릉\"}",
+                        "trip_type": "2d1n",
+                        "duration_label": "1박 2일",
+                        "themes_json": "[\"sea_coast\"]",
+                        "conditions_snapshot_json": "{}",
+                        "request_summary": "바다",
+                        "itinerary_json": json_dumps(snapshot_itinerary),
+                        "alternative_itinerary_json": None,
+                        "is_liked": 0,
+                        "saved_at": "2026-06-13T00:00:00Z",
+                        "updated_at": "2026-06-13T00:00:00Z",
+                        "deleted_at": None,
+                    }
+                ],
+                [
+                    {
+                        "id": "item-row-1",
+                        "itinerary_id": "plan-1",
+                        "day_index": 1,
+                        "sort_order": 1,
+                        "time_slot": "아침",
+                        "place_name": "안목해변",
+                        "content_id": "attraction#1",
+                        "place_id": None,
+                        "latitude": 37.771,
+                        "longitude": 128.947,
+                        "move_hint": "13분",
+                        "recommendation_reason": "바다 테마",
+                        "body": "해변 산책",
+                        "source_badges": "[]",
+                    }
+                ],
+            ]
+        )
+        repository = RdsDataSavedPlanRepository(rds_client=client)
+
+        plans = repository.list_by_user("user-1", limit=20)
+
+        list_sql = client.fetch_all_calls[0]["sql"]
+        day = plans[0]["itinerary"]["days"][0]
+        self.assertIn("itinerary_json", list_sql)
+        self.assertEqual(day["route"]["provider"], "openrouteservice")
+        self.assertEqual(day["route"]["geometry"]["coordinates"], [[128.947, 37.771], [128.908, 37.805]])
+        self.assertEqual(day["stops"][0]["latitude"], 37.771)
 
     def test_save_maps_frontend_stop_aliases_to_item_columns(self):
         client = FakeSqlClient()
@@ -255,6 +330,42 @@ class SavedPlansRepositorySchemaTest(unittest.TestCase):
         self.assertFalse(duplicate)
         self.assertEqual(plan["itineraryId"], "plan-1")
         self.assertTrue(any("DELETE FROM plan_reactions" in sql for sql in sql_statements))
+
+    def test_sharing_and_cloning_repository_logic(self):
+        # 1. Test In-Memory Repository
+        from saved_plans.repository import InMemorySavedPlanRepository
+        repo = InMemorySavedPlanRepository(now="2026-06-25T12:00:00Z")
+        payload = save_payload()
+
+        # Save private plan
+        plan, dup = repo.save("user-1", payload, "hash-1")
+        plan_id = plan["itineraryId"]
+        self.assertFalse(plan["isPublic"])
+
+        # Non-owner cannot view private plan
+        self.assertIsNone(repo.get_public_or_owned("user-2", plan_id))
+
+        # Make plan public
+        updated = repo.update_share_status("user-1", plan_id, True)
+        self.assertTrue(updated["isPublic"])
+
+        # Now non-owner can view
+        shared_plan = repo.get_public_or_owned("user-2", plan_id)
+        self.assertIsNotNone(shared_plan)
+        self.assertTrue(shared_plan["isPublic"])
+
+        # List public plans
+        public_list = repo.list_public()
+        self.assertEqual(len(public_list), 1)
+        self.assertEqual(public_list[0]["itineraryId"], plan_id)
+
+        # Clone plan by another user
+        cloned = repo.clone_itinerary("user-2", plan_id)
+        self.assertIsNotNone(cloned)
+        self.assertNotEqual(cloned["itineraryId"], plan_id)
+        self.assertEqual(cloned["userId"], "user-2")
+        self.assertEqual(cloned["copiedFromItineraryId"], plan_id)
+        self.assertFalse(cloned["isPublic"]) # Cloned plan must be private by default
 
 
 if __name__ == "__main__":

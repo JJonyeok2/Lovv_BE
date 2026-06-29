@@ -11,3 +11,4 @@ __pycache__/
 .aws-sam-cors-build/
 .vscode/
 build.toml
+scratch/

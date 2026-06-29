@@ -17,12 +17,29 @@ Parameters:
     Description: S3 prefix for city-by-city raw detail JSON files.
   ImageCdnBaseUrl:
     Type: String
-    Default: '{{resolve:ssm:/lovv/dev/cloudfront/image_base_url}}'
+    Default: ''
     Description: Public image CDN base URL for small-city image resolution. Override per environment.
   AgentCoreRuntimeArn:
     Type: String
-    Default: arn:aws:bedrock-agentcore:us-east-1:925273580929:runtime/myagent_MyAgent-FNVZimELXM
+    Default: arn:aws:bedrock-agentcore:us-east-1:925273580929:runtime/LovvAgentCore_LovvAgentV1-PumZyEGRsT
     Description: Bedrock AgentCore runtime ARN used by the recommendation Lambda.
+  OpenRouteServiceApiKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Optional OpenRouteService API key used server-side to enrich AgentCore itinerary routes.
+  OpenRouteServiceApiKeySsmName:
+    Type: String
+    Default: /lovv/dev/openrouteservice/api_key
+    Description: Optional SSM SecureString parameter name for the OpenRouteService API key. The key value is read at runtime.
+  OpenRouteServiceProfile:
+    Type: String
+    Default: driving-car
+    Description: OpenRouteService directions profile used for itinerary route enrichment.
+  OpenRouteServiceTimeoutSeconds:
+    Type: String
+    Default: '4'
+    Description: OpenRouteService request timeout in seconds. Route enrichment is skipped on timeout/failure.
   AuthTokenSigningSecretArn:
     Type: String
     Description: Secrets Manager ARN for JWT signing secret.
@@ -926,6 +943,10 @@ Resources:
       Environment:
         Variables:
           BEDROCK_AGENT_ARN: !Ref AgentCoreRuntimeArn
+          OPENROUTESERVICE_API_KEY: !Ref OpenRouteServiceApiKey
+          OPENROUTESERVICE_API_KEY_SSM_NAME: !Ref OpenRouteServiceApiKeySsmName
+          OPENROUTESERVICE_PROFILE: !Ref OpenRouteServiceProfile
+          OPENROUTESERVICE_TIMEOUT_SECONDS: !Ref OpenRouteServiceTimeoutSeconds
           CORS_ALLOW_ORIGIN: !Select [0, !Split [",", !Ref AllowedCorsOrigin]]
           CORS_ALLOW_ORIGINS: !Ref AllowedCorsOrigin
       Policies:
@@ -934,6 +955,10 @@ Resources:
               Action:
                 - "bedrock-agentcore:InvokeAgentRuntime"
               Resource: !Sub "${AgentCoreRuntimeArn}*"
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OpenRouteServiceApiKeySsmName}
       FunctionUrlConfig:
         AuthType: NONE
       Events:
@@ -1017,6 +1042,34 @@ Resources:
             ApiId: !Ref LovvHttpApi
             Method: DELETE
             Path: /api/v1/me/itineraries/{itineraryId}/reactions/like
+            Auth:
+              Authorizer: LovvTokenAuthorizer
+        ListPublicItineraries:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: GET
+            Path: /api/v1/itineraries/public
+        GetPublicItinerary:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: GET
+            Path: /api/v1/itineraries/{itineraryId}
+        ShareItinerary:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: PATCH
+            Path: /api/v1/me/itineraries/{itineraryId}/share
+            Auth:
+              Authorizer: LovvTokenAuthorizer
+        CloneItinerary:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: POST
+            Path: /api/v1/me/itineraries/{itineraryId}/clone
             Auth:
               Authorizer: LovvTokenAuthorizer
 

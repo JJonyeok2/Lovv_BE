@@ -165,10 +165,16 @@ class S3RawCityRepositoryTest(unittest.TestCase):
         self.assertNotIn("visitorStatistics", places)
 
     def test_maps_actual_s3_raw_shape_into_city_record_and_places(self):
+        image_map = {
+            "KR-Gangneung/GangreungAnmokhaematigongwon": "images/KR/Gangneung/GangreungAnmokhaematigongwon_1.jpg",
+            "KR-Gangneung/GangreungGyeongpodae": "images/KR/Gangneung/GangreungGyeongpodae_1.jpg",
+        }
         repository = S3RawCityRepository(
             bucket="bucket",
             prefix="raw/KR/details/20260609/",
             s3_client=FakeS3Client({"raw/KR/details/20260609/Gangneung.json": raw_city_actual_s3_shape()}),
+            cdn_base="https://images.example.com",
+            image_map=image_map,
         )
 
         records = repository.list_city_records()
@@ -181,11 +187,29 @@ class S3RawCityRepositoryTest(unittest.TestCase):
         self.assertEqual(records[0]["internal_meta"]["visitorStatisticsCount"], 2)
         self.assertAlmostEqual(records[0]["latitude"], (37.7611934162 + 37.7942610311229) / 2)
         self.assertAlmostEqual(records[0]["longitude"], (128.9393320379 + 128.895500767487) / 2)
+        self.assertTrue(records[0]["image_url"].startswith("https://images.example.com/images/KR/Gangneung/"))
         self.assertEqual(places["cityId"], "KR-Gangneung")
         self.assertEqual(places["attractions"][0]["contentId"], "2868839")
         self.assertEqual(places["attractions"][0]["description"], "강원도 토속 음식점이다.")
+        self.assertTrue(places["attractions"][0]["imageUrl"].startswith("https://images.example.com/images/KR/Gangneung/"))
         self.assertEqual(places["festivals"][0]["startDate"], "20260404")
         self.assertEqual(places["summary"], {"attractionCount": 1, "festivalCount": 1, "visitorStatisticsCount": 2})
+
+    def test_falls_back_to_tour_api_image_when_s3_city_images_are_unavailable(self):
+        repository = S3RawCityRepository(
+            bucket="bucket",
+            prefix="raw/KR/details/20260609/",
+            s3_client=FakeS3Client({"raw/KR/details/20260609/Gangneung.json": raw_city_actual_s3_shape()}),
+            cdn_base="https://images.example.com",
+            image_map={},
+        )
+
+        places = repository.get_city_places("KR-Gangneung")
+
+        self.assertEqual(
+            places["attractions"][0]["imageUrl"],
+            "https://tong.visitkorea.or.kr/cms/resource/29/2868829_image2_1.jpeg",
+        )
 
 
 if __name__ == "__main__":

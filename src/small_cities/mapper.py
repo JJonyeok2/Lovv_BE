@@ -169,18 +169,27 @@ def collect_highlights(items):
 
 def collect_image_url(items):
     for item in sorted((item for item in items if is_place_item(item)), key=rank_place):
-        image_url = item.get("image_url")
-        if is_usable_image_url(image_url):
-            return image_url.strip()
+        image_url = normalize_image_url(item.get("image_url"))
+        if image_url:
+            return image_url
     return None
 
 
 def is_usable_image_url(value):
-    if not isinstance(value, str):
-        return False
+    return normalize_image_url(value) is not None
 
-    parsed = urlparse(value.strip())
-    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+def normalize_image_url(value):
+    if not isinstance(value, str):
+        return None
+
+    trimmed = value.strip()
+    parsed = urlparse(trimmed)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return None
+    if parsed.scheme == "http":
+        return parsed._replace(scheme="https").geturl()
+    return trimmed
 
 
 def build_city_api_record(metadata, items, source="S3RawCityDetails", source_key=None):
