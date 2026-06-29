@@ -2,7 +2,7 @@ import json
 import os
 
 from small_cities.image_resolver import load_image_map, resolve_image_url
-from small_cities.mapper import build_city_api_record, is_usable_image_url, read_number
+from small_cities.mapper import build_city_api_record, normalize_image_url, read_number
 
 
 DEFAULT_BUCKET = "lovv-data-pipeline-dev-925273580929"
@@ -46,8 +46,11 @@ class S3RawCityRepository:
 
     @classmethod
     def from_env(cls):
-        cdn_base = os.environ.get("IMAGE_CDN_BASE_URL", "").strip().rstrip("/")
         image_data = load_image_map()
+        cdn_base = (
+            os.environ.get("IMAGE_CDN_BASE_URL", "").strip().rstrip("/")
+            or str(image_data.get("cdnBase", "")).strip().rstrip("/")
+        )
         return cls(
             bucket=os.environ.get("MAP_CITY_S3_BUCKET", DEFAULT_BUCKET),
             prefix=os.environ.get("MAP_CITY_S3_PREFIX", DEFAULT_PREFIX),
@@ -116,6 +119,12 @@ class S3RawCityRepository:
         city_record = _city_record_from_document(document)
         items = _items_from_document(document)
         record = build_city_api_record(city_record, items, source="S3RawCityDetails", source_key=key)
+        record["image_url"] = _resolve_representative_image_url(
+            items,
+            record.get("id"),
+            self.cdn_base,
+            self.image_map,
+        ) or record.get("image_url")
         record["detail_summary"] = _summary(city_record, items)
         return record
 
@@ -261,11 +270,11 @@ def _place_from_item(item, place_type, city_id="", cdn_base="", image_map=None):
     title = title.strip()
 
     # 1순위: S3 이미지 매핑에서 CloudFront URL 조회
-    s3_image_url = resolve_image_url(city_id, title, cdn_base, image_map or {})
+    s3_image_url = resolve_image_url(city_id, title, cdn_base, image_map or {}, allow_city_fallback=True)
 
     # 2순위: 기존 관광공사 firstimage URL (유효한 경우)
     fallback_url = item.get("image_url")
-    resolved_image_url = s3_image_url or (fallback_url.strip() if is_usable_image_url(fallback_url) else None)
+    resolved_image_url = s3_image_url or normalize_image_url(fallback_url)
 
     return {
         "placeId": item.get("entity_id") or f"{place_type.upper()}-{item.get('content_id', '')}",
@@ -284,6 +293,25 @@ def _place_from_item(item, place_type, city_id="", cdn_base="", image_map=None):
         "endDate": item.get("eventenddate") or None,
         "visitMonths": item.get("visit_months") if isinstance(item.get("visit_months"), list) else [],
     }
+
+
+def _resolve_representative_image_url(items, city_id="", cdn_base="", image_map=None):
+    if not city_id or not cdn_base:
+        return None
+
+    for item in items:
+        if item.get("entity_type") not in ("attraction", "festival"):
+            continue
+
+        title = item.get("title")
+        if not isinstance(title, str) or not title.strip():
+            continue
+
+        image_url = resolve_image_url(city_id, title.strip(), cdn_base, image_map or {}, allow_city_fallback=True)
+        if image_url:
+            return image_url
+
+    return None
 
 
 def _summary(city_record, records):

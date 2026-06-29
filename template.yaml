@@ -21,7 +21,7 @@ Parameters:
     Description: Public image CDN base URL for small-city image resolution. Override per environment.
   AgentCoreRuntimeArn:
     Type: String
-    Default: arn:aws:bedrock-agentcore:us-east-1:925273580929:runtime/myagent_MyAgent-FNVZimELXM
+    Default: arn:aws:bedrock-agentcore:us-east-1:925273580929:runtime/LovvAgentCore_LovvAgentV1-PumZyEGRsT
     Description: Bedrock AgentCore runtime ARN used by the recommendation Lambda.
   OpenRouteServiceApiKey:
     Type: String
@@ -1042,6 +1042,34 @@ Resources:
             ApiId: !Ref LovvHttpApi
             Method: DELETE
             Path: /api/v1/me/itineraries/{itineraryId}/reactions/like
+            Auth:
+              Authorizer: LovvTokenAuthorizer
+        ListPublicItineraries:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: GET
+            Path: /api/v1/itineraries/public
+        GetPublicItinerary:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: GET
+            Path: /api/v1/itineraries/{itineraryId}
+        ShareItinerary:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: PATCH
+            Path: /api/v1/me/itineraries/{itineraryId}/share
+            Auth:
+              Authorizer: LovvTokenAuthorizer
+        CloneItinerary:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: POST
+            Path: /api/v1/me/itineraries/{itineraryId}/clone
             Auth:
               Authorizer: LovvTokenAuthorizer
 

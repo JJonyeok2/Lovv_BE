@@ -10,6 +10,7 @@ S3 이미지 매핑 테이블(image_map.json)을 사용해서
 """
 
 import json
+import hashlib
 import os
 import re
 
@@ -133,6 +134,7 @@ def resolve_image_url(
     title: str,
     cdn_base: str,
     image_map: dict | None,
+    allow_city_fallback: bool = False,
 ) -> str | None:
     """
     city_id + title 조합으로 S3 이미지 URL을 해결.
@@ -140,6 +142,7 @@ def resolve_image_url(
     시도 순서:
     1. title 전체를 PascalCase stem으로 변환 후 image_map 조회
     2. 도시영문명을 앞에 붙인 stem으로 조회
+    3. allow_city_fallback=True이면 같은 city의 S3 이미지 중 title 기반으로 안정 선택
        (일부 지역은 파일명에 도시명이 prefix로 포함됨)
 
     Args:
@@ -147,6 +150,7 @@ def resolve_image_url(
         title:     관광지 한국어 제목, e.g. "청도박물관"
         cdn_base:  CloudFront base URL, e.g. "https://det7vj7wxfmim.cloudfront.net"
         image_map: load_image_map() 반환값의 "images" dict
+        allow_city_fallback: title 정확 매칭 실패 시 같은 도시의 S3 이미지를 fallback으로 허용
 
     Returns:
         CloudFront 전체 URL 또는 None
@@ -173,4 +177,31 @@ def resolve_image_url(
         if s3_key:
             return f"{cdn_base}/{s3_key}"
 
+    if allow_city_fallback:
+        return _resolve_city_fallback_url(city_id, title, cdn_base, image_map)
+
     return None
+
+
+def _resolve_city_fallback_url(
+    city_id: str,
+    title: str,
+    cdn_base: str,
+    image_map: dict,
+) -> str | None:
+    city_prefix = f"{city_id}/"
+    city_images = sorted(
+        s3_key
+        for key, s3_key in image_map.items()
+        if isinstance(key, str)
+        and key.startswith(city_prefix)
+        and isinstance(s3_key, str)
+        and s3_key.strip()
+    )
+
+    if not city_images:
+        return None
+
+    digest = hashlib.sha256(title.encode("utf-8")).hexdigest()
+    selected = city_images[int(digest[:8], 16) % len(city_images)]
+    return f"{cdn_base.rstrip('/')}/{selected}"

@@ -13,6 +13,12 @@ PREFERENCES_MIGRATION = (
     / "migrations"
     / "20260612_allow_both_country_track.sql"
 )
+ITINERARY_SNAPSHOT_MIGRATION = (
+    PROJECT_ROOT
+    / "schema"
+    / "aurora_mysql"
+    / "005_add_itinerary_snapshot_json.sql"
+)
 
 
 class ExistingDataStackTemplateTest(unittest.TestCase):
@@ -48,14 +54,28 @@ class ExistingDataStackTemplateTest(unittest.TestCase):
     def test_saved_plans_routes_use_lovv_token_authorizer(self):
         saved_plans_index = self.template.index("SavedPlansFunction:")
         saved_plans_block = self.template[saved_plans_index : self.template.index("SmallCitiesFunction:")]
-        self.assertEqual(saved_plans_block.count("Authorizer: LovvTokenAuthorizer"), 6)
+        self.assertEqual(saved_plans_block.count("Authorizer: LovvTokenAuthorizer"), 8)
         for path in (
             "Path: /api/v1/me/itineraries",
             "Path: /api/v1/me/itineraries/{itineraryId}",
             "Path: /api/v1/me/itineraries/{itineraryId}/reactions/like",
+            "Path: /api/v1/me/itineraries/{itineraryId}/share",
+            "Path: /api/v1/me/itineraries/{itineraryId}/clone",
         ):
             path_index = saved_plans_block.index(path)
             self.assertIn("Authorizer: LovvTokenAuthorizer", saved_plans_block[path_index : path_index + 220])
+
+    def test_saved_plans_public_routes_are_exposed_without_token_authorizer(self):
+        saved_plans_index = self.template.index("SavedPlansFunction:")
+        saved_plans_block = self.template[saved_plans_index : self.template.index("SmallCitiesFunction:")]
+        for path in (
+            "Path: /api/v1/itineraries/public",
+            "Path: /api/v1/itineraries/{itineraryId}",
+        ):
+            path_index = saved_plans_block.index(path)
+            next_event_index = saved_plans_block.find("\n        ", path_index + 1)
+            route_block = saved_plans_block[path_index:next_event_index]
+            self.assertNotIn("Authorizer: LovvTokenAuthorizer", route_block)
 
     def test_preferences_routes_use_lovv_token_authorizer(self):
         preferences_index = self.template.index("PreferenceFunction:")
@@ -243,6 +263,13 @@ class ExistingDataStackSchemaTest(unittest.TestCase):
 
         self.assertIn("chk_user_preferences_country", schema)
         self.assertIn("chk_user_preferences_country", migration)
+
+    def test_itinerary_snapshot_migration_is_idempotent_for_fresh_local_db(self):
+        migration = ITINERARY_SNAPSHOT_MIGRATION.read_text(encoding="utf-8")
+
+        self.assertIn("INFORMATION_SCHEMA.COLUMNS", migration)
+        self.assertIn("COLUMN_NAME = 'itinerary_json'", migration)
+        self.assertIn("@itinerary_json_exists = 0", migration)
 
 
 if __name__ == "__main__":
