@@ -1,6 +1,7 @@
 import os
 import json
 from collections import defaultdict
+from pathlib import Path
 
 from small_cities.image_resolver import load_image_map, resolve_image_url
 from small_cities.mapper import build_city_api_record, normalize_image_url, read_number
@@ -10,6 +11,7 @@ from small_cities.s3_raw_repository import CityDataInvalidError, CityDataNotFoun
 DEFAULT_TABLE_NAME = "TourKoreaDomainDataV2"
 DEFAULT_SOURCE_NAME = "DynamoDBTourKoreaDomainDataV2"
 DEFAULT_METADATA_AUDIT_BUCKET = "lovv-data-pipeline-dev-925273580929"
+DEFAULT_CATALOG_FILENAME = "city_catalog_kr_v2.json"
 CITY_DOMAIN_INDEX = "CityDomainIndex"
 LIST_SCAN_ATTRIBUTE_NAMES = {
     "#pk": "PK",
@@ -43,6 +45,8 @@ class DynamoDbSmallCityRepository:
         metadata_bucket=None,
         metadata_key=None,
         s3_client=None,
+        catalog_records=None,
+        catalog_path=None,
     ):
         self.table_name = table_name or os.environ.get("MAP_CITY_DYNAMODB_TABLE") or DEFAULT_TABLE_NAME
         self.table = table or (dynamodb_resource or _dynamodb_resource()).Table(self.table_name)
@@ -53,6 +57,9 @@ class DynamoDbSmallCityRepository:
         self.metadata_key = metadata_key
         self.s3 = s3_client
         self._metadata_by_city_key = _metadata_by_city_key_from_audit(metadata_audit) if metadata_audit else None
+        self._catalog_records = _catalog_records_from_payload(catalog_records) if catalog_records is not None else _load_catalog_records(catalog_path)
+        self._catalog_by_id = {record.get("id"): record for record in self._catalog_records if record.get("id")}
+        self._catalog_city_key_by_id = _catalog_city_key_by_id(self._catalog_records)
         self._city_item_groups = None
         self._city_records = None
 
@@ -73,9 +80,13 @@ class DynamoDbSmallCityRepository:
                 or DEFAULT_METADATA_AUDIT_BUCKET
             ),
             metadata_key=os.environ.get("MAP_CITY_METADATA_AUDIT_KEY", "").strip(),
+            catalog_path=os.environ.get("MAP_CITY_CATALOG_PATH", "").strip() or None,
         )
 
     def list_city_records(self):
+        if self._catalog_records:
+            return list(self._catalog_records)
+
         if self._city_records is not None:
             return list(self._city_records)
 
@@ -90,8 +101,14 @@ class DynamoDbSmallCityRepository:
         return list(records)
 
     def get_city_record(self, city_id):
+        if city_id in self._catalog_by_id:
+            return self._catalog_by_id[city_id]
+
         city_key = city_id_to_city_key(city_id)
         if city_key:
+            catalog_record = self._catalog_record_by_city_key(city_key)
+            if catalog_record:
+                return catalog_record
             items = self._query_city_items(city_key)
             if items:
                 return self._build_city_record(city_key, items)
@@ -103,7 +120,7 @@ class DynamoDbSmallCityRepository:
         return self._build_city_record(city_key, items)
 
     def get_city_places(self, city_id):
-        city_key = city_id_to_city_key(city_id)
+        city_key = self._catalog_city_key_by_id.get(city_id) or city_id_to_city_key(city_id)
         items = self._query_city_items(city_key) if city_key else []
         if not items:
             resolved = self._resolve_city_items(city_id)
@@ -232,6 +249,13 @@ class DynamoDbSmallCityRepository:
             raise CityDataInvalidError()
         return _metadata_by_city_key_from_audit(parsed)
 
+    def _catalog_record_by_city_key(self, city_key):
+        for record in self._catalog_records:
+            source_key = (record.get("internal_meta") or {}).get("sourceKey")
+            if source_key == city_key:
+                return record
+        return None
+
 
 def city_id_to_city_key(city_id):
     if not isinstance(city_id, str) or not city_id.strip():
@@ -296,6 +320,38 @@ def _metadata_by_city_key_from_audit(metadata_audit):
         if isinstance(city_key, str) and city_key.startswith("CITY#"):
             metadata_by_city_key[city_key] = city
     return metadata_by_city_key
+
+
+def _load_catalog_records(catalog_path=None):
+    path = Path(catalog_path) if catalog_path else Path(__file__).with_name(DEFAULT_CATALOG_FILENAME)
+    if not path.exists():
+        return []
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise CityDataInvalidError() from error
+    return _catalog_records_from_payload(payload)
+
+
+def _catalog_records_from_payload(payload):
+    records = payload.get("data") if isinstance(payload, dict) else payload
+    if not isinstance(records, list):
+        return []
+    return [record for record in records if isinstance(record, dict) and record.get("id")]
+
+
+def _catalog_city_key_by_id(records):
+    city_key_by_id = {}
+    for record in records:
+        city_id = record.get("id")
+        city_key = (record.get("internal_meta") or {}).get("sourceKey")
+        if isinstance(city_id, str) and isinstance(city_key, str) and city_key.startswith("CITY#"):
+            city_key_by_id[city_id] = city_key
+            legacy_id = legacy_city_id_from_city_key(city_key)
+            if legacy_id:
+                city_key_by_id[legacy_id] = city_key
+    return city_key_by_id
 
 
 def _is_city_domain_item(item):

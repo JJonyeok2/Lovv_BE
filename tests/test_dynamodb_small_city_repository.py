@@ -76,8 +76,8 @@ class DynamoDbSmallCityRepositoryTest(unittest.TestCase):
         self.assertEqual(city_id_to_city_key("KR-Dong-Ulsan"), "CITY#DONG-ULSAN")
 
     def test_lists_city_records_grouped_from_tour_korea_domain_data_v2_items(self):
-        table = FakeDynamoTable(items=gyeongju_items())
-        repository = DynamoDbSmallCityRepository(table_name="TourKoreaDomainDataV2", table=table)
+        table = FakeDynamoTable(items=gyeongju_items(), items_by_city={"CITY#GYEONGJU": gyeongju_items()})
+        repository = DynamoDbSmallCityRepository(table_name="TourKoreaDomainDataV2", table=table, catalog_records=[])
 
         records = repository.list_city_records()
 
@@ -91,9 +91,39 @@ class DynamoDbSmallCityRepositoryTest(unittest.TestCase):
         self.assertEqual(records[0]["internal_meta"]["source"], "DynamoDBTourKoreaDomainDataV2")
         self.assertEqual(records[0]["internal_meta"]["sourceKey"], "CITY#GYEONGJU")
 
+    def test_lists_city_records_from_catalog_without_runtime_scan(self):
+        catalog_record = {
+            "id": "KR-47-130",
+            "country": "KR",
+            "country_label": "한국",
+            "region": "경북",
+            "name_ko": "경주",
+            "name_local": "경주시",
+            "latitude": 35.83,
+            "longitude": 129.21,
+            "themes": ["전통"],
+            "summary": "경주 요약",
+            "detail": "경주 상세",
+            "highlights": ["황리단길"],
+            "route_seed": ["황리단길"],
+            "internal_meta": {"source": "DynamoDBTourKoreaDomainDataV2", "sourceKey": "CITY#GYEONGJU"},
+        }
+        table = FakeDynamoTable(items=gyeongju_items(), items_by_city={"CITY#GYEONGJU": gyeongju_items()})
+        repository = DynamoDbSmallCityRepository(table_name="TourKoreaDomainDataV2", table=table, catalog_records=[catalog_record])
+
+        records = repository.list_city_records()
+        detail = repository.get_city_record("KR-47-130")
+        places = repository.get_city_places("KR-47-130")
+
+        self.assertEqual(records, [catalog_record])
+        self.assertEqual(detail, catalog_record)
+        self.assertEqual(table.scan_calls, [])
+        self.assertEqual(table.query_calls[0]["ExpressionAttributeValues"][":city_key"], "CITY#GYEONGJU")
+        self.assertEqual(places["cityId"], "KR-47-130")
+
     def test_get_city_record_resolves_canonical_city_id_without_changing_api_shape(self):
         table = FakeDynamoTable(items=gyeongju_items())
-        repository = DynamoDbSmallCityRepository(table_name="TourKoreaDomainDataV2", table=table)
+        repository = DynamoDbSmallCityRepository(table_name="TourKoreaDomainDataV2", table=table, catalog_records=[])
 
         record = repository.get_city_record("KR-47-130")
 
@@ -103,7 +133,7 @@ class DynamoDbSmallCityRepositoryTest(unittest.TestCase):
 
     def test_get_city_places_queries_city_domain_index_and_maps_v2_festival_dates(self):
         table = FakeDynamoTable(items_by_city={"CITY#GYEONGJU": gyeongju_items()})
-        repository = DynamoDbSmallCityRepository(table_name="TourKoreaDomainDataV2", table=table)
+        repository = DynamoDbSmallCityRepository(table_name="TourKoreaDomainDataV2", table=table, catalog_records=[])
 
         places = repository.get_city_places("KR-Gyeongju")
 
@@ -151,6 +181,7 @@ class DynamoDbSmallCityRepositoryTest(unittest.TestCase):
             table_name="TourKoreaDomainDataV2",
             table=table,
             metadata_audit=metadata_audit,
+            catalog_records=[],
         )
 
         records = repository.list_city_records()
