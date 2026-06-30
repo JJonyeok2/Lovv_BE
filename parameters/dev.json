@@ -2,6 +2,8 @@
   { "ParameterKey": "AllowedCorsOrigin",          "ParameterValue": "http://127.0.0.1:5173,http://localhost:5173,https://d3nuef0zacpyj.cloudfront.net,https://dkyiemfaw3g04.cloudfront.net" },
   { "ParameterKey": "MapCityS3Bucket",             "ParameterValue": "lovv-data-pipeline-dev-925273580929" },
   { "ParameterKey": "MapCityS3Prefix",             "ParameterValue": "raw/KR/details/20260609/" },
+  { "ParameterKey": "MapCityDynamoTableName",      "ParameterValue": "TourKoreaDomainDataV2" },
+  { "ParameterKey": "MapCityMetadataAuditKey",     "ParameterValue": "" },
   { "ParameterKey": "ImageCdnBaseUrl",             "ParameterValue": "{{resolve:ssm:/lovv/dev/cloudfront/image_base_url}}" },
   { "ParameterKey": "AgentCoreRuntimeArn",         "ParameterValue": "arn:aws:bedrock-agentcore:us-east-1:925273580929:runtime/myagent_MyAgent-FNVZimELXM" },
   { "ParameterKey": "AuthTokenSigningSecretArn",   "ParameterValue": "arn:aws:secretsmanager:us-east-1:925273580929:secret:lovv/dev/jwt-signing-secret-LufcUG" },

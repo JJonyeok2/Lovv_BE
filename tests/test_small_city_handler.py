@@ -1,11 +1,13 @@
 import json
+import os
 import unittest
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from small_cities.app import handle_request
+from small_cities.app import default_repository, handle_request
 from small_cities.s3_raw_repository import S3RawCityRepository
 
 
@@ -146,6 +148,26 @@ class FakeRepository:
 
 
 class SmallCityHandlerTest(unittest.TestCase):
+    def test_default_repository_uses_dynamodb_source(self):
+        repository = object()
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("small_cities.app.DynamoDbSmallCityRepository.from_env", return_value=repository) as factory:
+                selected = default_repository()
+
+        self.assertIs(selected, repository)
+        factory.assert_called_once_with()
+
+    def test_default_repository_keeps_s3_raw_fallback_when_requested(self):
+        repository = object()
+
+        with patch.dict(os.environ, {"MAP_CITY_SOURCE": "s3"}, clear=True):
+            with patch("small_cities.app.S3RawCityRepository.from_env", return_value=repository) as factory:
+                selected = default_repository()
+
+        self.assertIs(selected, repository)
+        factory.assert_called_once_with()
+
     def test_handles_small_city_list_request(self):
         event = {
             "rawPath": "/api/small-cities",

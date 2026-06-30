@@ -9,6 +9,8 @@ S3 이미지 매핑 테이블(image_map.json)을 사용해서
     "KR-Andong/AndongBeopheungsajiChilcheungjeontap"
 """
 
+from __future__ import annotations
+
 import json
 import hashlib
 import os

@@ -226,10 +226,37 @@ class ExistingDataStackTemplateTest(unittest.TestCase):
     def test_small_cities_image_cdn_base_url_is_environment_parameter(self):
         self.assertIn("ImageCdnBaseUrl:", self.template)
         index = self.template.index("SmallCitiesFunction:")
-        block = self.template[index : index + 520]
+        block = self.template[index : index + 760]
 
         self.assertIn("IMAGE_CDN_BASE_URL: !Ref ImageCdnBaseUrl", block)
         self.assertNotIn("IMAGE_CDN_BASE_URL: '{{resolve:ssm:/lovv/dev/cloudfront/image_base_url}}'", block)
+
+    def test_small_cities_uses_tour_korea_dynamodb_v2_by_default(self):
+        self.assertIn("MapCityDynamoTableName:", self.template)
+        self.assertIn("Default: TourKoreaDomainDataV2", self.template)
+        index = self.template.index("SmallCitiesFunction:")
+        block = self.template[index : index + 1100]
+
+        self.assertIn("MAP_CITY_SOURCE: dynamodb", block)
+        self.assertIn("MAP_CITY_DYNAMODB_TABLE: !Ref MapCityDynamoTableName", block)
+
+    def test_small_cities_can_use_optional_metadata_audit_s3_key(self):
+        self.assertIn("MapCityMetadataAuditKey:", self.template)
+        index = self.template.index("SmallCitiesFunction:")
+        block = self.template[index : index + 1800]
+
+        self.assertIn("MAP_CITY_METADATA_AUDIT_BUCKET: !Ref MapCityS3Bucket", block)
+        self.assertIn("MAP_CITY_METADATA_AUDIT_KEY: !Ref MapCityMetadataAuditKey", block)
+        self.assertIn("!Sub arn:${AWS::Partition}:s3:::${MapCityS3Bucket}/metadata_audit/*", block)
+
+    def test_small_cities_can_query_dynamodb_city_domain_index(self):
+        index = self.template.index("SmallCitiesFunction:")
+        block = self.template[index : index + 1800]
+
+        self.assertIn("dynamodb:Query", block)
+        self.assertIn("dynamodb:Scan", block)
+        self.assertIn("!Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${MapCityDynamoTableName}", block)
+        self.assertIn("!Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${MapCityDynamoTableName}/index/CityDomainIndex", block)
 
     def test_agentcore_runtime_arn_is_environment_parameter(self):
         self.assertIn("AgentCoreRuntimeArn:", self.template)

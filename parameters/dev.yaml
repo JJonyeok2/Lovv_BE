@@ -4,6 +4,10 @@
   ParameterValue: "lovv-data-pipeline-dev-925273580929"
 - ParameterKey: MapCityS3Prefix
   ParameterValue: "raw/KR/details/20260609/"
+- ParameterKey: MapCityDynamoTableName
+  ParameterValue: "TourKoreaDomainDataV2"
+- ParameterKey: MapCityMetadataAuditKey
+  ParameterValue: ""
 - ParameterKey: ImageCdnBaseUrl
   ParameterValue: "{{resolve:ssm:/lovv/dev/cloudfront/image_base_url}}"
 - ParameterKey: AgentCoreRuntimeArn

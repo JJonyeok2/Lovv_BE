@@ -1,12 +1,14 @@
 # @file src/small_cities/app.py
-# @description S3 버킷에 로드된 원시 소도시 JSON 데이터를 분석하여 프론트엔드에 마커 및 상세 관광 콘텐츠 목록을 제공하는 Lambda 핸들러.
+# @description 소도시 원천 데이터를 분석하여 프론트엔드에 마커 및 상세 관광 콘텐츠 목록을 제공하는 Lambda 핸들러.
 # @lastModified 2026-06-23
 
 import json
+import os
 from decimal import Decimal
 
 from shared.http import cors_headers
 from shared.logger import Tag, get_logger
+from small_cities.dynamodb_repository import DynamoDbSmallCityRepository
 from small_cities.mapper import VALID_THEMES
 from small_cities.s3_raw_repository import CityDataInvalidError, CityDataNotFoundError, CityDataUpstreamError, S3RawCityRepository
 from small_cities.service import DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, SmallCityService
@@ -38,7 +40,7 @@ def handle_request(event, repository=None):
         if method != "GET":
             return error_response("INVALID_METHOD", "Only GET is supported.", 405, event=event)
 
-        service = SmallCityService(repository or S3RawCityRepository.from_env())
+        service = SmallCityService(repository or default_repository())
         city_id = get_city_id(event)
         markers_only = is_marker_request(event)
         places_request = is_places_request(event)
@@ -180,6 +182,15 @@ def parse_positive_int(value, default, name, maximum=None):
         raise RequestValidationError(f"{name} must be {maximum} or lower.")
 
     return parsed
+
+
+def default_repository():
+    source = os.environ.get("MAP_CITY_SOURCE", "dynamodb").strip().lower()
+    if source in ("", "dynamodb", "dynamo"):
+        return DynamoDbSmallCityRepository.from_env()
+    if source in ("s3", "s3_raw", "s3-raw"):
+        return S3RawCityRepository.from_env()
+    raise CityDataInvalidError()
 
 
 def json_response(body, status_code=200, event=None):
