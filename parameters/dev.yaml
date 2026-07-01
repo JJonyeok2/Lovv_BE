@@ -71,7 +71,7 @@
 - ParameterKey: RdsHost
   ParameterValue: "lovv-dev-mysql.ci18eue8oz99.us-east-1.rds.amazonaws.com"
 - ParameterKey: RdsSecretArn
-  UsePreviousValue: true
+  ParameterValue: "arn:aws:secretsmanager:us-east-1:925273580929:secret:rds!db-02d80cc9-c09e-4705-b26a-383520c68f1f-4JxfzN"
 - ParameterKey: RdsDatabaseName
   ParameterValue: "lovvdev"
 - ParameterKey: VpcId
