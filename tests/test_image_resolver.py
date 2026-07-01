@@ -1,7 +1,7 @@
 """tests/test_image_resolver.py — image_resolver 단위 테스트"""
 import unittest
 
-from small_cities.image_resolver import _to_pascal_stem, load_image_map, resolve_image_url
+from small_cities.image_resolver import _romanize_korean, _to_pascal_stem, load_image_map, resolve_image_url
 
 
 # --------------------------------------------------------------------------- #
@@ -35,6 +35,17 @@ class TestToPascalStem(unittest.TestCase):
         # ASCII 입력은 소문자로 처리된 후 첫 글자 대문자
         result = _to_pascal_stem("cafe")
         assert result == "Cafe"
+
+    def test_liaison_romanization_variant(self):
+        assert _romanize_korean("강릉", apply_liaison=True) == "gangneung"
+        assert _romanize_korean("강릉", apply_liaison=False) == "gangreung"
+        assert _to_pascal_stem("강릉", apply_liaison=True) == "Gangneung"
+        assert _to_pascal_stem("강릉", apply_liaison=False) == "Gangreung"
+        assert _romanize_korean("정릉", apply_liaison=True) == "jeongneung"
+        assert _romanize_korean("정릉", apply_liaison=False) == "jeongreung"
+
+    def test_unrelated_existing_romanization_is_unchanged(self):
+        assert _to_pascal_stem("백천계곡") == "Baekcheongyegok"
 
 
 # --------------------------------------------------------------------------- #
@@ -72,6 +83,28 @@ class TestResolveImageUrl(unittest.TestCase):
             SAMPLE_MAP,
         )
         assert url == f"{CDN_BASE}/images/KR/Andong/AndongBeopheungsajiChilcheungjeontap_1.jpg"
+
+    def test_liaison_stem_match(self):
+        image_map = {
+            "KR-Gangneung/GangneungJeongdongjin": (
+                "images/KR/Gangneung/GangneungJeongdongjin_1.jpg"
+            )
+        }
+
+        url = resolve_image_url("KR-Gangneung", "강릉 정동진", CDN_BASE, image_map)
+
+        assert url == f"{CDN_BASE}/images/KR/Gangneung/GangneungJeongdongjin_1.jpg"
+
+    def test_plain_stem_match_when_s3_uses_non_liaison_spelling(self):
+        image_map = {
+            "KR-Gangneung/GangreungJeongdongjin": (
+                "images/KR/Gangneung/GangreungJeongdongjin_1.jpg"
+            )
+        }
+
+        url = resolve_image_url("KR-Gangneung", "강릉 정동진", CDN_BASE, image_map)
+
+        assert url == f"{CDN_BASE}/images/KR/Gangneung/GangreungJeongdongjin_1.jpg"
 
     def test_cheongdo_no_prefix(self):
         """Cheongdo — prefix 없는 파일 매핑"""
