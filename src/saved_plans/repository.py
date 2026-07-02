@@ -181,11 +181,17 @@ class RdsDataSavedPlanRepository:
                      WHERE pr.user_id = :user_id
                        AND pr.itinerary_id = i.id
                        AND pr.reaction_type = 'like'
-                   ) AS is_liked
+                   ) AS is_liked,
+                   (
+                     SELECT COUNT(*)
+                     FROM {self.reaction_table_name} pr2
+                     WHERE pr2.itinerary_id = i.id
+                       AND pr2.reaction_type = 'like'
+                   ) AS like_count
             FROM {self.table_name} i
             WHERE i.is_public = 1
               AND i.deleted_at IS NULL
-            ORDER BY i.saved_at DESC
+            ORDER BY like_count DESC, i.saved_at DESC
             LIMIT :limit
             """,
             {"user_id": user_id, "limit": limit},
@@ -603,6 +609,7 @@ def _summary(plan):
         "itinerary": _itinerary_with_entry_aliases(plan.get("itinerary") or {}),
         "isLiked": bool(plan.get("isLiked")),
         "isPublic": bool(plan.get("isPublic")),
+        "likeCount": plan.get("likeCount") or 0,
         "copiedFromItineraryId": plan.get("copiedFromItineraryId"),
         "savedAt": plan.get("savedAt"),
         "updatedAt": plan.get("updatedAt"),
@@ -667,6 +674,7 @@ def _plan_from_row(row):
         "alternativeItinerary": json_loads(row.get("alternative_itinerary_json"), None),
         "isLiked": bool(row.get("is_liked")),
         "isPublic": bool(row.get("is_public")),
+        "likeCount": row.get("like_count") or 0,
         "copiedFromItineraryId": row.get("copied_from_itinerary_id"),
         "savedAt": row.get("saved_at"),
         "updatedAt": row.get("updated_at"),

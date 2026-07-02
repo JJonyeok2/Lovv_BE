@@ -977,6 +977,76 @@ Resources:
             Method: POST
             Path: /api/v1/recommendations
 
+  RecommendationFeedFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: recommendations.app.lambda_handler
+      Description: Home monthly city and authenticated reaction-based recommendation feed API.
+      Timeout: 30
+      Environment:
+        Variables:
+          DB_ACCESS_MODE: mysql
+          RDS_HOST: !Ref RdsHost
+          RDS_SECRET_ARN: !Ref RdsSecretArn
+          RDS_DATABASE_NAME: !Ref RdsDatabaseName
+          USERS_TABLE_NAME: !Ref UsersTableName
+          SAVED_PLANS_TABLE_NAME: !Ref SavedPlansTableName
+          PLAN_REACTIONS_TABLE_NAME: !Ref PlanReactionsTableName
+          MAP_CITY_SOURCE: dynamodb
+          MAP_CITY_DYNAMODB_TABLE: !Ref MapCityDynamoTableName
+          MAP_CITY_METADATA_AUDIT_BUCKET: !Ref MapCityS3Bucket
+          MAP_CITY_METADATA_AUDIT_KEY: !Ref MapCityMetadataAuditKey
+          MAP_CITY_S3_BUCKET: !Ref MapCityS3Bucket
+          MAP_CITY_S3_PREFIX: !Ref MapCityS3Prefix
+          IMAGE_CDN_BASE_URL: !Ref ImageCdnBaseUrl
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref AppFunctionSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnetA
+          - !Ref PrivateSubnetC
+      Policies:
+        - AWSLambdaVPCAccessExecutionRole
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref RdsSecretArn
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:Scan
+                - dynamodb:GetItem
+              Resource:
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${MapCityDynamoTableName}
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${MapCityDynamoTableName}/index/CityDomainIndex
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                - !Sub arn:${AWS::Partition}:s3:::${MapCityS3Bucket}/metadata_audit/*
+      Events:
+        MonthlyCities:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: GET
+            Path: /api/v1/recommendations/monthly-cities
+        PopularDestinations:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: GET
+            Path: /api/v1/recommendations/popular-destinations
+        ReactionCities:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LovvHttpApi
+            Method: GET
+            Path: /api/v1/recommendations/reaction-cities
+            Auth:
+              Authorizer: LovvTokenAuthorizer
+
   SavedPlansFunction:
     Type: AWS::Serverless::Function
     Properties:
