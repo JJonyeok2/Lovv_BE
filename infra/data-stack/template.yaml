@@ -359,7 +359,6 @@ Resources:
       PrivateDnsEnabled: true
       SubnetIds:
         - !Ref LovvPrivateSubnetA
-        - !Ref LovvPrivateSubnetC
       SecurityGroupIds:
         - !Ref LovvEndpointSecurityGroup
 
@@ -373,7 +372,6 @@ Resources:
       PrivateDnsEnabled: true
       SubnetIds:
         - !Ref LovvPrivateSubnetA
-        - !Ref LovvPrivateSubnetC
       SecurityGroupIds:
         - !Ref LovvEndpointSecurityGroup
 

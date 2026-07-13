@@ -68,9 +68,10 @@ _CODA = [
 _HANGUL_START = 0xAC00
 
 
-def _romanize_korean(text: str) -> str:
+def _romanize_korean(text: str, apply_liaison: bool = False) -> str:
     """한국어 문자열을 개정 국어 표기법 로마자로 변환."""
     result = []
+    previous_coda_idx = 0
     for ch in text:
         code = ord(ch)
         if _HANGUL_START <= code <= 0xD7A3:
@@ -78,13 +79,16 @@ def _romanize_korean(text: str) -> str:
             onset_idx = offset // (21 * 28)
             vowel_idx = (offset % (21 * 28)) // 28
             coda_idx = offset % 28
-            result.append(_ONSET[onset_idx] + _VOWEL[vowel_idx] + _CODA[coda_idx])
+            onset = "n" if apply_liaison and previous_coda_idx == 21 and onset_idx == 5 else _ONSET[onset_idx]
+            result.append(onset + _VOWEL[vowel_idx] + _CODA[coda_idx])
+            previous_coda_idx = coda_idx
         else:
             result.append(ch.lower())
+            previous_coda_idx = 0
     return "".join(result)
 
 
-def _to_pascal_stem(title: str) -> str:
+def _to_pascal_stem(title: str, apply_liaison: bool = False) -> str:
     """
     한국어 제목 → S3 PascalCase stem.
     띄어쓰기 단위로 각 단어를 로마자화 후 첫 글자 대문자로 이어붙임.
@@ -92,10 +96,28 @@ def _to_pascal_stem(title: str) -> str:
     """
     parts = []
     for word in title.split():
-        romanized = re.sub(r"[^a-z0-9]", "", _romanize_korean(word))
+        romanized = re.sub(r"[^a-z0-9]", "", _romanize_korean(word, apply_liaison=apply_liaison))
         if romanized:
             parts.append(romanized[0].upper() + romanized[1:])
     return "".join(parts)
+
+
+def _to_pascal_stems(title: str) -> list[str]:
+    stems = (
+        _to_pascal_stem(title, apply_liaison=True),
+        _to_pascal_stem(title, apply_liaison=False),
+    )
+    return _dedupe(stem for stem in stems if stem)
+
+
+def _dedupe(values) -> list[str]:
+    result = []
+    seen = set()
+    for value in values:
+        if value not in seen:
+            result.append(value)
+            seen.add(value)
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -163,15 +185,15 @@ def resolve_image_url(
     # city_id → 영문 도시명 (e.g. "KR-Cheongdo" → "Cheongdo")
     city_en = city_id.split("-", 1)[1] if "-" in city_id else city_id
 
-    stem = _to_pascal_stem(title)
-    if not stem:
+    stems = _to_pascal_stems(title)
+    if not stems:
         return None
 
     # 후보 key 목록 (순서대로 시도)
-    candidates = [
-        f"{city_id}/{stem}",          # e.g. "KR-Cheongdo/Bulryeongsa"
-        f"{city_id}/{city_en}{stem}",  # e.g. "KR-Cheongdo/CheongdoBulryeongsa"
-    ]
+    candidates = _dedupe(
+        [f"{city_id}/{stem}" for stem in stems]
+        + [f"{city_id}/{city_en}{stem}" for stem in stems]
+    )
 
     cdn_base = cdn_base.rstrip("/")
     for key in candidates:
