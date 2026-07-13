@@ -5,7 +5,7 @@ Description: Lovv backend API for social auth, preferences, map/city, mock recom
 Parameters:
   AllowedCorsOrigin:
     Type: String
-    Default: http://localhost:5173,http://127.0.0.1:5173,https://d3nuef0zacpyj.cloudfront.net,https://dkyiemfaw3g04.cloudfront.net,https://lovv-admin-web.vercel.app,https://lovv-admin-web-skn26.vercel.app,https://lovv-admin-web-eta.vercel.app
+    Default: http://localhost:5173,http://127.0.0.1:5173,https://d3nuef0zacpyj.cloudfront.net,https://dkyiemfaw3g04.cloudfront.net,https://www.lovv.site,https://lovv-admin-web.vercel.app,https://lovv-admin-web-skn26.vercel.app,https://lovv-admin-web-eta.vercel.app
     Description: Comma-separated browser origins allowed to send credentialed API requests.
   MapCityS3Bucket:
     Type: String
@@ -29,7 +29,7 @@ Parameters:
     Description: Public image CDN base URL for small-city image resolution. Override per environment.
   AgentCoreRuntimeArn:
     Type: String
-    Default: arn:aws:bedrock-agentcore:us-east-1:925273580929:runtime/LovvAgentCore_LovvAgentV1-PumZyEGRsT
+    Default: arn:aws:bedrock-agentcore:us-east-1:925273580929:runtime/LovvAgentCore_LovvAgentV2-cy3tYk7nV4
     Description: Bedrock AgentCore runtime ARN used by the recommendation Lambda.
   OpenRouteServiceApiKey:
     Type: String
@@ -141,11 +141,11 @@ Parameters:
     Description: Globally unique Cognito Hosted UI domain prefix. Replace before deployment.
   CognitoCallbackUrls:
     Type: CommaDelimitedList
-    Default: http://localhost:5173/auth/callback/cognito,http://127.0.0.1:5173/auth/callback/cognito,https://d3nuef0zacpyj.cloudfront.net/auth/callback/cognito
+    Default: http://localhost:5173/auth/callback/cognito,http://127.0.0.1:5173/auth/callback/cognito,https://d3nuef0zacpyj.cloudfront.net/auth/callback/cognito,https://www.lovv.site/auth/callback/cognito
     Description: Comma-separated Cognito OAuth callback URLs. Use HTTPS except localhost/127.0.0.1.
   CognitoLogoutUrls:
     Type: CommaDelimitedList
-    Default: http://localhost:5173/,http://127.0.0.1:5173/,https://d3nuef0zacpyj.cloudfront.net/
+    Default: http://localhost:5173/,http://127.0.0.1:5173/,https://d3nuef0zacpyj.cloudfront.net/,https://www.lovv.site/
     Description: Comma-separated Cognito OAuth logout redirect URLs. Use HTTPS except localhost/127.0.0.1.
   CognitoGoogleClientId:
     Type: String

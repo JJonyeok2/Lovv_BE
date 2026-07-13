@@ -164,6 +164,126 @@ class SavedPlansAppTest(unittest.TestCase):
         self.assertEqual(conflict["statusCode"], 409)
         self.assertEqual(body["error"]["code"], "IDEMPOTENCY_KEY_CONFLICT")
 
+    def test_rejects_too_many_user_added_restaurants_per_day(self):
+        payload = save_payload(
+            itinerary={
+                "days": [
+                    {
+                        "day": 1,
+                        "items": [
+                            {
+                                "itemId": f"meal-{index}",
+                                "sortOrder": index,
+                                "title": f"맛집 {index}",
+                                "body": "사용자 추가 맛집",
+                                "source": "wishlist",
+                                "lockLevel": "user_added",
+                                "wishlistRestaurantId": f"kakao-{index}",
+                            }
+                            for index in range(1, 5)
+                        ],
+                    }
+                ]
+            },
+        )
+        response = handle_request(make_event("POST", "/api/v1/me/itineraries", payload), repository=self.repository)
+        body = json.loads(response["body"])
+
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual(body["error"]["code"], "RESTAURANT_LIMIT_EXCEEDED")
+
+    def test_rejects_duplicate_user_added_restaurants_in_same_day(self):
+        restaurant_stop = {
+            "itemId": "meal-1",
+            "sortOrder": 1,
+            "title": "중복 맛집",
+            "body": "사용자 추가 맛집",
+            "source": "wishlist",
+            "lockLevel": "user_added",
+            "wishlistRestaurantId": "kakao-duplicated",
+        }
+        payload = save_payload(
+            itinerary={
+                "days": [
+                    {
+                        "day": 1,
+                        "items": [
+                            restaurant_stop,
+                            {**restaurant_stop, "itemId": "meal-2", "sortOrder": 2},
+                        ],
+                    }
+                ]
+            },
+        )
+        response = handle_request(make_event("POST", "/api/v1/me/itineraries", payload), repository=self.repository)
+        body = json.loads(response["body"])
+
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual(body["error"]["code"], "RESTAURANT_DUPLICATED")
+
+    def test_rejects_user_added_restaurant_over_30km_from_day_route(self):
+        payload = save_payload(
+            itinerary={
+                "days": [
+                    {
+                        "day": 1,
+                        "items": [
+                            {
+                                "itemId": "base-stop",
+                                "sortOrder": 1,
+                                "title": "안목해변",
+                                "body": "기준 코스",
+                                "latitude": 37.771,
+                                "longitude": 128.947,
+                            },
+                            {
+                                "itemId": "meal-1",
+                                "sortOrder": 2,
+                                "title": "먼 맛집",
+                                "body": "사용자 추가 맛집",
+                                "source": "wishlist",
+                                "lockLevel": "user_added",
+                                "wishlistRestaurantId": "far-kakao",
+                                "latitude": 37.5665,
+                                "longitude": 126.9780,
+                            },
+                        ],
+                    }
+                ]
+            },
+        )
+        response = handle_request(make_event("POST", "/api/v1/me/itineraries", payload), repository=self.repository)
+        body = json.loads(response["body"])
+
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual(body["error"]["code"], "RESTAURANT_TOO_FAR")
+
+    def test_allows_user_added_restaurant_without_coordinates(self):
+        payload = save_payload(
+            itinerary={
+                "days": [
+                    {
+                        "day": 1,
+                        "items": [
+                            {"itemId": "base-stop", "sortOrder": 1, "title": "안목해변", "body": "기준 코스"},
+                            {
+                                "itemId": "meal-1",
+                                "sortOrder": 2,
+                                "title": "좌표 없는 맛집",
+                                "body": "사용자 추가 맛집",
+                                "source": "wishlist",
+                                "lockLevel": "user_added",
+                                "wishlistRestaurantId": "no-coordinate-kakao",
+                            },
+                        ],
+                    }
+                ]
+            },
+        )
+        response = handle_request(make_event("POST", "/api/v1/me/itineraries", payload), repository=self.repository)
+
+        self.assertEqual(response["statusCode"], 201)
+
     def test_rejects_raw_chat_history_fields(self):
         response = handle_request(
             make_event("POST", "/api/v1/me/itineraries", save_payload(messages=[{"role": "user"}])),

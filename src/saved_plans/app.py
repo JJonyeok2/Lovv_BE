@@ -4,6 +4,7 @@
 
 import base64
 import json
+import math
 from datetime import datetime, timezone
 
 from saved_plans.repository import (
@@ -24,6 +25,8 @@ LOGGER = get_logger(__name__)
 RAW_HISTORY_FIELDS = {"messages", "chatHistory", "conversation", "transcript"}
 # 소유권 관련 메타데이터 필드는 클라이언트가 임의로 수정할 수 없다.
 FORBIDDEN_OWNER_FIELDS = {"userId", "user_id", "ownerId", "createdBy"}
+MAX_USER_ADDED_RESTAURANTS_PER_DAY = 3
+MAX_USER_ADDED_RESTAURANT_DISTANCE_METERS = 30_000
 
 
 class SavedPlanRequestError(Exception):
@@ -209,7 +212,118 @@ def _validate_save_payload(payload):
         raise SavedPlanRequestError(400, "INVALID_ITINERARY_SNAPSHOT", "itinerary days are required")
     if not any(isinstance(day, dict) and _day_entries(day) for day in itinerary["days"]):
         raise SavedPlanRequestError(400, "INVALID_ITINERARY_SNAPSHOT", "itinerary items are required")
+    _validate_user_added_restaurants(itinerary)
     return payload
+
+
+def _validate_user_added_restaurants(itinerary):
+    """사용자가 직접 추가한 맛집이 일정 저장 경계를 벗어나지 않는지 최종 검증한다."""
+    for day in itinerary.get("days") or []:
+        if not isinstance(day, dict):
+            continue
+
+        entries = [entry for entry in _day_entries(day) if isinstance(entry, dict)]
+        user_added_entries = [entry for entry in entries if _is_user_added_restaurant(entry)]
+        if len(user_added_entries) > MAX_USER_ADDED_RESTAURANTS_PER_DAY:
+            raise SavedPlanRequestError(
+                400,
+                "RESTAURANT_LIMIT_EXCEEDED",
+                "User-added restaurants are limited to 3 per day",
+            )
+
+        seen_restaurant_ids = set()
+        for entry in user_added_entries:
+            restaurant_key = _restaurant_identity(entry)
+            if restaurant_key and restaurant_key in seen_restaurant_ids:
+                raise SavedPlanRequestError(
+                    400,
+                    "RESTAURANT_DUPLICATED",
+                    "User-added restaurant is duplicated in the same day",
+                )
+            if restaurant_key:
+                seen_restaurant_ids.add(restaurant_key)
+
+        route_coordinates = [
+            coords
+            for entry in entries
+            if not _is_user_added_restaurant(entry)
+            for coords in [_entry_coordinates(entry)]
+            if coords is not None
+        ]
+        if not route_coordinates:
+            continue
+
+        for entry in user_added_entries:
+            restaurant_coordinates = _entry_coordinates(entry)
+            if restaurant_coordinates is None:
+                continue
+            nearest_distance = min(
+                _distance_meters(restaurant_coordinates, route_coordinates_item)
+                for route_coordinates_item in route_coordinates
+            )
+            if nearest_distance > MAX_USER_ADDED_RESTAURANT_DISTANCE_METERS:
+                raise SavedPlanRequestError(
+                    400,
+                    "RESTAURANT_TOO_FAR",
+                    "User-added restaurant is too far from the itinerary route",
+                )
+
+
+def _is_user_added_restaurant(entry):
+    return (
+        entry.get("wishlistRestaurantId")
+        or entry.get("wishlist_restaurant_id")
+        or entry.get("source") in {"wishlist", "manual"}
+        or entry.get("lockLevel") == "user_added"
+        or entry.get("lock_level") == "user_added"
+    )
+
+
+def _restaurant_identity(entry):
+    restaurant_id = entry.get("wishlistRestaurantId") or entry.get("wishlist_restaurant_id")
+    if _non_empty_string(restaurant_id):
+        return f"id:{restaurant_id.strip()}"
+
+    title = entry.get("title") or entry.get("placeName") or entry.get("place_name")
+    if _non_empty_string(title):
+        return f"title:{title.strip().casefold()}"
+
+    return None
+
+
+def _entry_coordinates(entry):
+    latitude = _number_or_none(entry.get("latitude") if entry.get("latitude") is not None else entry.get("lat"))
+    longitude = _number_or_none(entry.get("longitude") if entry.get("longitude") is not None else entry.get("lng"))
+    if latitude is None or longitude is None:
+        return None
+    if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+        return None
+    return latitude, longitude
+
+
+def _number_or_none(value):
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _distance_meters(origin, destination):
+    origin_lat, origin_lng = origin
+    destination_lat, destination_lng = destination
+    earth_radius_meters = 6_371_000
+    d_lat = math.radians(destination_lat - origin_lat)
+    d_lng = math.radians(destination_lng - origin_lng)
+    a = (
+        math.sin(d_lat / 2) ** 2
+        + math.cos(math.radians(origin_lat))
+        * math.cos(math.radians(destination_lat))
+        * math.sin(d_lng / 2) ** 2
+    )
+    return earth_radius_meters * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 def _public_detail(plan):

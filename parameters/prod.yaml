@@ -11,7 +11,7 @@
 - ParameterKey: ImageCdnBaseUrl
   ParameterValue: "{{resolve:ssm:/lovv/prod/cloudfront/image_base_url}}"
 - ParameterKey: AgentCoreRuntimeArn
-  ParameterValue: "arn:aws:bedrock-agentcore:us-east-1:925273580929:runtime/lovv-prod-agentcore-replace-me"
+  ParameterValue: "arn:aws:bedrock-agentcore:us-east-1:925273580929:runtime/LovvAgentCore_LovvAgentV2-cy3tYk7nV4"
 - ParameterKey: AuthTokenSigningSecretArn
   ParameterValue: "arn:aws:secretsmanager:us-east-1:925273580929:secret:lovv/prod/jwt-signing-secret-replace-me"
 - ParameterKey: AuthTokenTtlSeconds
