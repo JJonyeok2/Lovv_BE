@@ -266,6 +266,19 @@ class ExistingDataStackTemplateTest(unittest.TestCase):
         self.assertIn("BEDROCK_AGENT_ARN: !Ref AgentCoreRuntimeArn", block)
         self.assertIn('Resource: !Sub "${AgentCoreRuntimeArn}*"', block)
 
+    def test_recommendation_feed_routes_are_exposed_with_expected_auth(self):
+        self.assertIn("RecommendationFeedFunction:", self.template)
+        index = self.template.index("RecommendationFeedFunction:")
+        block = self.template[index : self.template.index("SmallCitiesFunction:")]
+
+        monthly_path_index = block.index("Path: /api/v1/recommendations/monthly-cities")
+        monthly_block = block[monthly_path_index : monthly_path_index + 220]
+        self.assertNotIn("Authorizer: LovvTokenAuthorizer", monthly_block)
+
+        reaction_path_index = block.index("Path: /api/v1/recommendations/reaction-cities")
+        reaction_block = block[reaction_path_index : reaction_path_index + 260]
+        self.assertIn("Authorizer: LovvTokenAuthorizer", reaction_block)
+
     def test_agentcore_openrouteservice_key_is_server_side_noecho_parameter(self):
         self.assertIn("OpenRouteServiceApiKey:", self.template)
         parameter_index = self.template.index("OpenRouteServiceApiKey:")

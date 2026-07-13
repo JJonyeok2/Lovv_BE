@@ -234,6 +234,7 @@ def _public_detail(plan):
         "alternativeItinerary": plan.get("alternativeItinerary"),
         "isLiked": bool(plan.get("isLiked")),
         "isPublic": bool(plan.get("isPublic")),
+        "likeCount": plan.get("likeCount") or 0,
         "copiedFromItineraryId": plan.get("copiedFromItineraryId"),
         "savedAt": plan.get("savedAt"),
         "updatedAt": plan.get("updatedAt"),
